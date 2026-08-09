@@ -238,7 +238,10 @@ class Users_Mobile extends Base_Users_Mobile
 		$link = Q_Uri::url('Users/activate?p=1&code='.urlencode($this->activationCode)
 			. ' mobileNumber='.urlencode($number));
 		Users::$cache['Users/activate link'] = $link;
-		$unsubscribe = Q_Uri::url('Users/unsubscribe?mobileNumber='.urlencode($number));
+		$unsubscribe = Q_Uri::url('Users/unsubscribe?' . http_build_query(array(
+			'authCode' =>  $this->authCode, 
+			'mobileNumber' => $this->number
+		)));
 		$communityName = Users::communityName();
 		$communitySuffix = Users::communitySuffix();
 		$mobile = $this;

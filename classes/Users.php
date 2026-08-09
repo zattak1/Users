@@ -2673,7 +2673,7 @@ abstract class Users extends Base_Users
 	 * @param {string} $event The event to search templates for
 	 * @param {array} [$fields] Any additional fields to pass to the template
 	 *   and use for the subjects of emails, etc.
-	 * @param {string} $text Override name of additional text to pass to the template.
+	 * @param {string|array} $text Override name of additional text to pass to the template.
 	 *   By default, it is "$module/deliver"
 	 * @param {boolean} [$usePending=false] Pass true to deliver to emails and mobile numbers
 	 *   even pending verification. Note that this can be abused to spam random people who never opted in.
