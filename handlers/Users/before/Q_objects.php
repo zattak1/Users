@@ -31,7 +31,29 @@ function Users_before_Q_objects(&$params)
 	$sigField = Q_Config::get('Users', 'signatures', 'sigField', null);
 	$nonceField = Q_Config::get('Users', 'signatures', 'nonceField', null);
 
-	if ($sigField && !empty($_SESSION['Users']['publicKey'])) {
+	// Only a request that can carry a body can carry a signed payload, so only
+	// those are subject to the signature/nonce check below.
+	//
+	// SECURITY/BUG: "Users"/"requireLogin" is the list of URIs that require a
+	// *logged-in user* -- that is how Users/after/Q_reroute (redirect to the
+	// login flow) and Users/before/Q_initialExtras (Q.plugins.Users.requireLogin)
+	// read it. It is NOT a list of URIs whose requests must arrive signed.
+	// Running the loop below unconditionally therefore made an ordinary GET of
+	// any URI in that list throw as soon as the session had a publicKey: $_POST
+	// is empty on a GET, so Q_Valid::requireFields(array($nonceField), $_POST,
+	// true) threw Q_Exception_RequiredField and Q_Dispatcher::errors() re-rendered
+	// the page with a red "Q_Users_nonce is required" banner over otherwise
+	// correct content. The Communities plugin ships
+	// Users/requireLogin = {"Communities/me": true}, which is what made the /me
+	// profile page greet every logged-in user with that banner (zattak1/ro#85).
+	//
+	// Gating on the method keeps enforcement intact for the state-changing
+	// requests it was written for, and drops it for the safe methods that could
+	// never have satisfied it.
+	$method = Q_Request::method();
+	$methodCanBeSigned = !in_array($method, array('GET', 'HEAD', 'OPTIONS'));
+
+	if ($sigField && $methodCanBeSigned && !empty($_SESSION['Users']['publicKey'])) {
 		$sigField = str_replace('.', '_', $sigField);
 		$rl = Q_Config::get('Users', 'requireLogin', array());
 		$duri = Q_Dispatcher::uri();
