@@ -135,8 +135,36 @@ class Users_Referred extends Base_Users_Referred
 		$byType[$referredType] = $existing;
 		$referred->setExtra('byType', $byType);
 
-		// Save the row
-		$referred->save(true);
+		// Save the row. Use save(true) with a duplicate-key guard rather than
+		// a bare save(). Two concurrent requests (e.g. the Stripe webhook being
+		// retried, or accept() and Assets/credits/spend firing in parallel) can
+		// both call retrieve(), both get "not found", both try INSERT, and the
+		// second one fails with a duplicate-key error. Catching it and merging
+		// is correct because max() on points is already how this method handles
+		// an existing row.
+		try {
+			$referred->save();
+		} catch (Exception $e) {
+			if (Q::ifset(Q::$cache, 'Db_Query_Exception_Duplicate', false)
+			or strpos($e->getMessage(), 'Duplicate') !== false) {
+				// lost the race: re-read, merge, update
+				$referred2 = new Users_Referred(array(
+					'userId' => $userId,
+					'toCommunityId' => $communityId,
+					'referredByUserId' => $byUserId
+				));
+				if ($referred2->retrieve()) {
+					$referred2->points = max($referred2->points, $referred->points);
+					$referred2->extra = $referred->extra;
+					if (!empty($referred->qualifiedTime)) {
+						$referred2->qualifiedTime = $referred->qualifiedTime;
+					}
+					$referred2->save();
+				}
+			} else {
+				throw $e; // a real error, not a race
+			}
+		}
 
 		/**
 		 * @event Users/referred {after}
