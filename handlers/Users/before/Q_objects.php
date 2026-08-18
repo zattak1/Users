@@ -31,7 +31,13 @@ function Users_before_Q_objects(&$params)
 	$sigField = Q_Config::get('Users', 'signatures', 'sigField', null);
 	$nonceField = Q_Config::get('Users', 'signatures', 'nonceField', null);
 
-	if ($sigField && !empty($_SESSION['Users']['publicKey'])) {
+	// Only enforce request signatures on POSTs: the client-side hook signs
+	// specific submissions (fields land in the POST body), while this gate
+	// reads $_POST exclusively - so enforcing it on GET page loads of a
+	// requireLogin URI threw 'nonce is required' on every page view once
+	// the session had a publicKey.
+	if ($sigField && !empty($_SESSION['Users']['publicKey'])
+	&& Q_Request::method() === 'POST') {
 		$sigField = str_replace('.', '_', $sigField);
 		$rl = Q_Config::get('Users', 'requireLogin', array());
 
