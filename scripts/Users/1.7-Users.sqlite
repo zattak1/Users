@@ -1,0 +1,311 @@
+-- Users plugin — flattened SQLITE DDL
+-- {{prefix}} is substituted by Qbix at install time.
+
+CREATE TABLE {{prefix}}app_user (
+    userId TEXT DEFAULT '',
+    provider TEXT DEFAULT '',
+    appId TEXT DEFAULT '',
+    provider_uid TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    access_token TEXT DEFAULT NULL,
+    session_secret TEXT DEFAULT NULL,
+    session_expires TEXT NULL DEFAULT NULL,
+    state TEXT NOT NULL DEFAULT 'visited',
+    fromAddress TEXT DEFAULT '',
+    contractABIName TEXT DEFAULT '',
+    PRIMARY KEY (userId,provider,appId),
+    UNIQUE (provider,appId,provider_uid)
+);
+
+CREATE TABLE {{prefix}}contact (
+    userId TEXT DEFAULT '',
+    label TEXT DEFAULT '',
+    contactUserId TEXT DEFAULT '',
+    nickname TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (userId,label,contactUserId)
+);
+
+CREATE TABLE {{prefix}}device (
+    userId TEXT DEFAULT '',
+    deviceId TEXT DEFAULT '',
+    platform TEXT DEFAULT '',
+    version TEXT DEFAULT NULL,
+    sessionId TEXT DEFAULT '',
+    formFactor TEXT DEFAULT NULL,
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    appId TEXT DEFAULT '',
+    auth TEXT DEFAULT '',
+    p256dh TEXT DEFAULT NULL,
+    PRIMARY KEY (userId,deviceId)
+);
+
+CREATE TABLE {{prefix}}email (
+    address TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    userId TEXT DEFAULT '',
+    state TEXT DEFAULT '',
+    activationCode TEXT DEFAULT '',
+    activationCodeExpires TEXT NULL DEFAULT NULL,
+    authCode TEXT DEFAULT '',
+    PRIMARY KEY (address),
+    UNIQUE (address)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}external_from (
+    platform TEXT DEFAULT '',
+    appId TEXT DEFAULT '',
+    xid TEXT DEFAULT '',
+    insertedTime TEXT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    userId TEXT DEFAULT '',
+    responseType TEXT DEFAULT NULL,
+    accessToken TEXT DEFAULT NULL,
+    expires TEXT NULL DEFAULT NULL,
+    extra TEXT DEFAULT '{}',
+    PRIMARY KEY (platform,appId,xid)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}external_to (
+    userId TEXT DEFAULT '',
+    platform TEXT DEFAULT '',
+    appId TEXT DEFAULT '',
+    insertedTime TEXT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    xid TEXT DEFAULT '',
+    responseType TEXT DEFAULT NULL,
+    accessToken TEXT DEFAULT NULL,
+    expires TEXT NULL DEFAULT NULL,
+    extra TEXT DEFAULT '{}',
+    PRIMARY KEY (userId,platform,appId)
+);
+
+CREATE TABLE {{prefix}}identify (
+    identifier TEXT DEFAULT '',
+    state TEXT DEFAULT '',
+    userId TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    PRIMARY KEY (identifier)
+);
+
+CREATE TABLE {{prefix}}intent (
+    token TEXT DEFAULT '',
+    action TEXT DEFAULT '',
+    instructions TEXT DEFAULT '',
+    sessionId TEXT NULL,
+    userId TEXT NULL,
+    startTime TEXT NULL DEFAULT NULL,
+    endTime TEXT NULL DEFAULT NULL,
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    resourceId TEXT NULL DEFAULT NULL,
+    url TEXT NULL DEFAULT NULL,
+    completedTime TEXT NULL DEFAULT NULL,
+    name TEXT NULL DEFAULT NULL,
+    PRIMARY KEY (token)
+);
+
+CREATE TABLE {{prefix}}label (
+    userId TEXT DEFAULT '',
+    label TEXT DEFAULT '',
+    icon TEXT DEFAULT '',
+    title TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    PRIMARY KEY (userId,label)
+);
+
+CREATE TABLE {{prefix}}link (
+    identifier TEXT DEFAULT '',
+    userId TEXT DEFAULT '',
+    extraInfo TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (identifier, userId)
+);
+
+CREATE TABLE {{prefix}}mobile (
+    number TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    userId TEXT DEFAULT '',
+    extension TEXT DEFAULT '',
+    carrier TEXT NOT NULL DEFAULT 'unverified',
+    state TEXT NOT NULL DEFAULT 'unverified',
+    capabilities TEXT NOT NULL DEFAULT 'unverified',
+    activationCode TEXT DEFAULT '',
+    activationCodeExpires TEXT NULL DEFAULT NULL,
+    authCode TEXT DEFAULT '',
+    PRIMARY KEY (number),
+    UNIQUE (number)
+);
+
+CREATE TABLE {{prefix}}oAuth (
+    userId TEXT DEFAULT '',
+    client_id TEXT DEFAULT '',
+    state TEXT DEFAULT '',
+    scope TEXT NOT NULL DEFAULT 'user',
+    redirect_uri TEXT DEFAULT '',
+    access_token TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    token_expires_seconds INTEGER DEFAULT NULL,
+    PRIMARY KEY (userId,client_id)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}permission (
+    userId TEXT DEFAULT '',
+    label TEXT DEFAULT '',
+    permission TEXT DEFAULT '',
+    extra TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    PRIMARY KEY (userId,label)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}quota (
+    userId TEXT DEFAULT '',
+    resourceId TEXT DEFAULT '',
+    name TEXT DEFAULT '',
+    units INTEGER NOT NULL DEFAULT 1,
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE {{prefix}}referred (
+    userId TEXT DEFAULT '',
+    toCommunityId TEXT DEFAULT '',
+    referredByUserId TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    points REAL DEFAULT NULL,
+    qualifiedTime TEXT NULL,
+    extra TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (userId,toCommunityId,referredByUserId)
+);
+CREATE INDEX idx_toCommunityId_referredByUserId ON {{prefix}}referred (toCommunityId,referredByUserId);
+
+CREATE TABLE {{prefix}}session (
+    id TEXT DEFAULT '',
+    content TEXT DEFAULT '',
+    php TEXT DEFAULT '',
+    userId TEXT DEFAULT '',
+    deviceId TEXT DEFAULT '',
+    timeout INTEGER NOT NULL DEFAULT 0,
+    duration INTEGER NOT NULL DEFAULT 0,
+    updatedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    platform TEXT DEFAULT NULL,
+    appId TEXT DEFAULT NULL,
+    version TEXT DEFAULT NULL,
+    formFactor TEXT DEFAULT NULL,
+    ipv4 BLOB DEFAULT NULL,
+    ipv6 BLOB DEFAULT NULL,
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);
+
+CREATE TABLE {{prefix}}setting (
+    userId TEXT DEFAULT '',
+    name TEXT DEFAULT NULL,
+    content TEXT DEFAULT NULL,
+    insertedTime TEXT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    PRIMARY KEY (userId)
+);
+
+CREATE TABLE {{prefix}}total (
+    forType TEXT DEFAULT '',
+    forId TEXT DEFAULT '',
+    voteCount INTEGER(20) NOT NULL DEFAULT '0',
+    weightTotal REAL NOT NULL DEFAULT '0.0000',
+    value REAL NOT NULL DEFAULT '0.0000',
+    updatedTime TEXT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (forType,forId)
+);
+
+CREATE TABLE {{prefix}}user (
+    id TEXT NOT NULL DEFAULT '0',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    sessionId TEXT DEFAULT NULL,
+    sessionCount INTEGER NOT NULL DEFAULT 0,
+    passphraseHash TEXT DEFAULT NULL,
+    emailAddress TEXT DEFAULT NULL,
+    mobileNumber TEXT DEFAULT NULL,
+    xids TEXT DEFAULT NULL,
+    emailAddressPending TEXT DEFAULT '',
+    mobileNumberPending TEXT DEFAULT '',
+    signedUpWith TEXT NOT NULL DEFAULT 'none',
+    username TEXT DEFAULT '',
+    icon TEXT DEFAULT '',
+    url TEXT DEFAULT NULL,
+    pincodeHash TEXT DEFAULT NULL,
+    salt TEXT DEFAULT NULL,
+    preferredLanguage TEXT DEFAULT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE TABLE {{prefix}}vote (
+    userId TEXT DEFAULT '',
+    forType TEXT DEFAULT '',
+    forId TEXT DEFAULT '',
+    value REAL NOT NULL,
+    weight REAL NOT NULL DEFAULT '1.0000',
+    updatedTime TEXT NULL DEFAULT CURRENT_TIMESTAMP,
+    extra TEXT DEFAULT '{}',
+    PRIMARY KEY (userId,forType,forId)
+);
+
+CREATE TABLE {{prefix}}web3 (
+    chainId TEXT DEFAULT '',
+    contract TEXT DEFAULT '',
+    methodName TEXT DEFAULT '',
+    params TEXT DEFAULT '',
+    fromAddress TEXT DEFAULT '',
+    result text,
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    PRIMARY KEY (chainId, contract, methodName,params)
+);
+
+CREATE TABLE {{prefix}}web3_transaction (
+    chainId TEXT DEFAULT '',
+    transactionId TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    contract TEXT DEFAULT '',
+    contractABIName TEXT DEFAULT '',
+    methodName TEXT DEFAULT '',
+    params TEXT DEFAULT '',
+    fromAddress TEXT DEFAULT '',
+    userId TEXT DEFAULT '',
+    extra TEXT DEFAULT '',
+    result text,
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    PRIMARY KEY (chainId, transactionId)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS updatedTime ON {{prefix}}intent (updatedTime);
+CREATE INDEX IF NOT EXISTS userId ON {{prefix}}intent (userId);
+CREATE INDEX IF NOT EXISTS byTime ON {{prefix}}intent (userId, resourceId, name, insertedTime);
+
+
+-- Additional indexes
+CREATE INDEX IF NOT EXISTS idx_userId ON {{prefix}}intent (userId);
+CREATE INDEX IF NOT EXISTS idx_sessionId ON {{prefix}}intent (sessionId);
+CREATE INDEX IF NOT EXISTS idx_endTime ON {{prefix}}intent (endTime);
+CREATE INDEX IF NOT EXISTS idx_referredByUserId_toCommunityId ON {{prefix}}referred (referredByUserId,toCommunityId);
+CREATE INDEX IF NOT EXISTS idx_status_userId ON {{prefix}}web3_transaction (status, userId);
+CREATE TABLE IF NOT EXISTS {{prefix}}field (
+    userId TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    type TEXT DEFAULT '',
+    content TEXT DEFAULT '',
+    insertedTime TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime TEXT NULL DEFAULT NULL,
+    access TEXT DEFAULT '',
+    dialogId TEXT DEFAULT '',
+    PRIMARY KEY (userId, name)
+);

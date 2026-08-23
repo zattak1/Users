@@ -1,0 +1,271 @@
+-- Users plugin — flattened POSTGRES DDL
+-- {{prefix}} is substituted by Qbix at install time.
+
+CREATE TABLE IF NOT EXISTS {{prefix}}app_user (
+    userId BYTEA NOT NULL DEFAULT '',
+    provider TEXT NOT NULL,
+    appId BYTEA NOT NULL,
+    provider_uid BYTEA NOT NULL,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    access_token varchar(1023) DEFAULT NULL,
+    session_secret varchar(1023) DEFAULT NULL,
+    session_expires timestamp NULL DEFAULT NULL,
+    state TEXT NOT NULL DEFAULT 'visited',
+    PRIMARY KEY (userId,provider,appId),
+    UNIQUE (provider,appId,provider_uid)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}contact (
+    userId BYTEA NOT NULL DEFAULT '',
+    label varchar(63) NOT NULL,
+    contactUserId BYTEA NOT NULL DEFAULT '',
+    nickname varchar(255) NOT NULL DEFAULT '',
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (userId,label,contactUserId)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}device (
+    userId BYTEA NOT NULL,
+    deviceId BYTEA NOT NULL,
+    platform TEXT NOT NULL,
+    version varchar(45) DEFAULT NULL,
+    sessionId BYTEA NOT NULL,
+    formFactor TEXT DEFAULT NULL,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (userId,deviceId)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}email (
+    address BYTEA NOT NULL,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    userId BYTEA NOT NULL DEFAULT '',
+    state TEXT NOT NULL,
+    activationCode BYTEA NOT NULL,
+    activationCodeExpires timestamp NULL DEFAULT NULL,
+    authCode BYTEA NOT NULL,
+    PRIMARY KEY (address),
+    UNIQUE (address)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}external_from (
+    platform BYTEA NOT NULL DEFAULT '',
+    appId BYTEA NOT NULL DEFAULT '',
+    xid BYTEA NOT NULL DEFAULT '',
+    insertedTime timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    userId varchar(31) NOT NULL DEFAULT '',
+    responseType TEXT DEFAULT NULL,
+    accessToken varchar(1023) DEFAULT NULL,
+    expires timestamp NULL DEFAULT NULL,
+    extra varchar(1023) DEFAULT '{}',
+    PRIMARY KEY (platform,appId,xid)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}external_to (
+    userId BYTEA NOT NULL DEFAULT '',
+    platform BYTEA NOT NULL DEFAULT '',
+    appId BYTEA NOT NULL DEFAULT '',
+    insertedTime timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    xid varchar(200) NOT NULL DEFAULT '',
+    responseType TEXT DEFAULT NULL,
+    accessToken varchar(1023) DEFAULT NULL,
+    expires timestamp NULL DEFAULT NULL,
+    extra varchar(1023) DEFAULT '{}',
+    PRIMARY KEY (userId,platform,appId)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}identify (
+    identifier BYTEA NOT NULL,
+    state TEXT NOT NULL,
+    userId BYTEA NOT NULL,
+    PRIMARY KEY (identifier)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}intent (
+    token BYTEA NOT NULL,
+    action BYTEA NOT NULL,
+    instructions BYTEA NOT NULL,
+    sessionId BYTEA NULL,
+    userId BYTEA NULL,
+    startTime timestamp NULL DEFAULT NULL,
+    endTime timestamp NULL DEFAULT NULL,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (token)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}label (
+    userId BYTEA NOT NULL,
+    label varchar(63) NOT NULL,
+    icon BYTEA NOT NULL,
+    title varchar(255) NOT NULL,
+    PRIMARY KEY (userId,label)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}link (
+    identifier BYTEA NOT NULL,
+    userId BYTEA NOT NULL DEFAULT '',
+    extraInfo varchar(255) NOT NULL,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (identifier, userId)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}mobile (
+    number BYTEA NOT NULL,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    userId BYTEA NOT NULL DEFAULT '',
+    extension varchar(7) NOT NULL DEFAULT '',
+    carrier TEXT NOT NULL DEFAULT 'unverified',
+    state TEXT NOT NULL DEFAULT 'unverified',
+    capabilities TEXT NOT NULL DEFAULT 'unverified',
+    activationCode BYTEA NOT NULL,
+    activationCodeExpires timestamp NULL DEFAULT NULL,
+    authCode BYTEA NOT NULL,
+    PRIMARY KEY (number),
+    UNIQUE (number)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}oAuth (
+    userId BYTEA NOT NULL,
+    client_id BYTEA NOT NULL,
+    state BYTEA NOT NULL,
+    scope varchar(255) NOT NULL DEFAULT 'user',
+    redirect_uri BYTEA NOT NULL,
+    access_token BYTEA NOT NULL,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    token_expires_seconds INTEGER DEFAULT NULL,
+    PRIMARY KEY (userId,client_id)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}permission (
+    userId varchar(31) NOT NULL DEFAULT '',
+    label varchar(63) NOT NULL,
+    permission varchar(255) NOT NULL DEFAULT '',
+    extra varchar(255) NOT NULL DEFAULT '',
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (userId,label)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}quota (
+    userId BYTEA NOT NULL,
+    resourceId BYTEA NOT NULL DEFAULT '',
+    name BYTEA NOT NULL,
+    units INTEGER NOT NULL DEFAULT 1,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}referred (
+    userId BYTEA NOT NULL,
+    toCommunityId BYTEA NOT NULL,
+    referredByUserId BYTEA NOT NULL,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    points DECIMAL(4,2) DEFAULT NULL,
+    qualifiedTime timestamp NULL,
+    extra VARCHAR(1023) NOT NULL DEFAULT '{}',
+    PRIMARY KEY (userId,toCommunityId,referredByUserId)
+);
+CREATE INDEX IF NOT EXISTS idx_toCommunityId_referredByUserId ON {{prefix}}referred (toCommunityId,referredByUserId);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}session (
+    id BYTEA NOT NULL,
+    content varchar(4095) NOT NULL,
+    php varchar(4095) NOT NULL,
+    deviceId BYTEA NOT NULL,
+    timeout INTEGER NOT NULL DEFAULT 0,
+    duration INTEGER NOT NULL DEFAULT 0,
+    updatedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}setting (
+    userId BYTEA NOT NULL,
+    name varchar(255) DEFAULT NULL,
+    content varchar(255) DEFAULT NULL,
+    insertedTime timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (userId)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}total (
+    forType BYTEA NOT NULL,
+    forId BYTEA NOT NULL,
+    voteCount BIGINT NOT NULL DEFAULT '0',
+    weightTotal decimal(10,4) NOT NULL DEFAULT '0.0000',
+    value decimal(10,4) NOT NULL DEFAULT '0.0000',
+    updatedTime timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (forType,forId)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}user (
+    id BYTEA NOT NULL DEFAULT '0',
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    sessionId BYTEA DEFAULT NULL,
+    mobileToken BYTEA DEFAULT NULL,
+    fb_uid BIGINT NOT NULL DEFAULT '0',
+    tw_uid BIGINT NOT NULL DEFAULT '0',
+    g_uid BYTEA DEFAULT NULL,
+    y_uid BYTEA DEFAULT NULL,
+    passphraseHash varchar(64) DEFAULT NULL,
+    emailAddress BYTEA DEFAULT NULL,
+    mobileNumber BYTEA DEFAULT NULL,
+    emailAddressPending BYTEA NOT NULL DEFAULT '',
+    mobileNumberPending BYTEA NOT NULL DEFAULT '',
+    signedUpWith TEXT NOT NULL DEFAULT 'none',
+    username varchar(63) NOT NULL,
+    icon BYTEA NOT NULL,
+    url BYTEA DEFAULT NULL,
+    pincodeHash BYTEA DEFAULT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}vote (
+    userId BYTEA NOT NULL,
+    forType BYTEA NOT NULL,
+    forId BYTEA NOT NULL,
+    value decimal(10,4) NOT NULL,
+    weight decimal(10,4) NOT NULL DEFAULT '1.0000',
+    updatedTime timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (userId,forType,forId)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}web3 (
+    chainId varchar(10) NOT NULL,
+    contract varchar(42) NOT NULL,
+    methodName varchar(63) NOT NULL DEFAULT '',
+    params varchar(1023) NOT NULL DEFAULT '',
+    result text,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (chainId, contract, methodName,params)
+);
+
+CREATE TABLE IF NOT EXISTS {{prefix}}web3_transaction (
+    chainId varchar(10) NOT NULL,
+    transactionId varchar(100) NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    contract varchar(42) NOT NULL DEFAULT '',
+    methodName varchar(63) NOT NULL DEFAULT '',
+    params varchar(1023) NOT NULL DEFAULT '',
+    fromAddress varchar(100) NOT NULL,
+    userId BYTEA NOT NULL,
+    extra BYTEA DEFAULT '',
+    result text,
+    insertedTime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedTime timestamp NULL DEFAULT NULL,
+    PRIMARY KEY (chainId, transactionId)
+);
+
+-- Indexes
+
+
+-- Additional indexes
+CREATE INDEX IF NOT EXISTS idx_referredByUserId_toCommunityId ON {{prefix}}referred (referredByUserId,toCommunityId);
+CREATE INDEX IF NOT EXISTS idx_status_userId ON {{prefix}}web3_transaction (status, userId);

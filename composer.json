@@ -5,8 +5,14 @@
 			"name": "Qbix"
 		}
 	],
+	"repositories": [
+		{
+			"type": "vcs",
+			"url": "https://github.com/Qbix/simple-web3-php.git"
+		}
+	],
 	"require": {
-        "qbix/simple-web3-php": "dev-main",
+		"qbix/simple-web3-php": "dev-main",
 		"minishlink/web-push": "^6.0.0",
 		"aws/aws-sdk-php": "3.*",
 		"twilio/sdk": "^7.4"
