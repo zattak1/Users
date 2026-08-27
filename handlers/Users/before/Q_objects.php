@@ -134,9 +134,22 @@ function Users_before_Q_objects(&$params)
 		if (!$intent->isValid()) {
 			throw new Q_Exception_Expired();
 		}
-		$intent->accept(array(
+		// evenIfCompleted is needed here: the external-platform return leg
+		// lands on this URL *after* Users/intent PUT has stamped completedTime.
+		// It is no longer a replay hole - accept() now also requires
+		// Users_Intent::authorizeAcceptingSession(), so this token only logs in
+		// the session that opened the intent, or (for actions that declare
+		// "handoff") the first single other session it is handed to.
+		// Answers the upstream "SECURITY DECISION" comment on this line.
+		// The script data is published only on a SUCCESSFUL accept. It was
+		// published unconditionally, so a session that was refused the login
+		// still received the intent's instructions - which for Assets/charge
+		// carry the payer's userId, the community, the reason and the amount.
+		// A token holder who may not accept has no business seeing any of it.
+		if ($intent->accept(array(
 			'evenIfCompleted' => true
-		)); // authenticates this session, and logs user in
-		Q_Response::setScriptData('Q.plugins.Users.intent', $intent->exportArray());
+		))) { // authenticates this session, and logs user in
+			Q_Response::setScriptData('Q.plugins.Users.intent', $intent->exportArray());
+		}
 	}
 }
