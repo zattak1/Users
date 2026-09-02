@@ -65,7 +65,7 @@ class Users_Intent extends Base_Users_Intent
 	/**
 	 * Generate a unique token that can be used for intents.
 	 * Then sign capability and return it.
-	 * Re-uses same capability if called multiple times.
+	 * Each call returns a fresh token and a capability signing it.
 	 * @method capability
 	 * @param {array} $data Any additional data to include in the capability
 	 * @static
@@ -74,16 +74,19 @@ class Users_Intent extends Base_Users_Intent
 	static function capability($data = array())
 	{
 		$data['token'] = self::generateToken();
-		static $c = null;
-		if (!isset($c)) {
-			$duration = Q_Config::expect('Users', 'capability', 'duration');
-			$time = floor(Q::millisecondsStarted() / 1000);
-			$c = new Q_Capability(
-				array('Users/intent'), 
-				$data, $time, $time + $duration
-			);
-		}
-		return $c;
+		// Deliberately NOT cached in a static. The static cache this replaced
+		// was keyed on nothing, so a second call in the same request generated
+		// a fresh token, threw it away, and returned the FIRST call's
+		// capability - signing away any $data the second caller passed and
+		// handing back a token it had never seen. Construction is a config
+		// read and an HMAC, and $time is Q::millisecondsStarted(), which is
+		// constant for the request, so caching bought nothing anyway.
+		$duration = Q_Config::expect('Users', 'capability', 'duration');
+		$time = floor(Q::millisecondsStarted() / 1000);
+		return new Q_Capability(
+			array('Users/intent'), 
+			$data, $time, $time + $duration
+		);
 	}
 
 	/**
@@ -134,7 +137,14 @@ class Users_Intent extends Base_Users_Intent
 				'sessionId' => $sessionId,
 				'action' => $action,
 				'insertedTime' => new Db_Range(new Db_Expression("CURRENT_TIMESTAMP - INTERVAL $debounce SECOND"), false, false, null)
-			))->andWhere('completedTime IS NOT NULL')
+			))
+			// IS NULL, not IS NOT NULL: the debounce exists to hand back the
+			// intent this session just opened instead of minting another one.
+			// A completed intent is spent - accept() refuses it unless the
+			// caller passes evenIfCompleted - so matching on completed rows
+			// returned a token that could not be accepted, while the pending
+			// intent the caller actually wanted was never matched at all.
+			->andWhere('completedTime IS NULL')
 			->fetchDbRows();
 		if (count($intents)) {
 			$intent = reset($intents);
