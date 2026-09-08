@@ -972,6 +972,98 @@ abstract class Users extends Base_Users
 	}
 
 	/**
+	 * Invalidates every server-side session belonging to a user, except
+	 * (optionally) one. Use this on credential changes: until this is called,
+	 * a session cookie copied from a lost phone, a shared laptop or a backup
+	 * keeps working for the full remaining session lifetime, which is exactly
+	 * what changing a passphrase is supposed to end.
+	 *
+	 * Each session is torn down the same way Users::logout() tears down the
+	 * current one - sockets disconnected on the node side, the session's
+	 * devices forgotten so push notifications stop, then the row removed -
+	 * because removing the row alone would leave a live socket and a device
+	 * that still receives notifications.
+	 *
+	 * @method logoutOtherSessions
+	 * @static
+	 * @param {Users_User|string} [$user=null] The user, or user id.
+	 *   Defaults to the logged-in user, if any.
+	 * @param {string|false} [$exceptSessionId=null] Session id to keep alive.
+	 *   Defaults to the current session, so the caller isn't logged out of the
+	 *   tab they are using. Pass false to invalidate every session.
+	 * @return {integer} The number of sessions that were invalidated
+	 */
+	static function logoutOtherSessions($user = null, $exceptSessionId = null)
+	{
+		if (!isset($user)) {
+			$user = self::loggedInUser(false, false);
+		} else if (is_string($user)) {
+			$user = Users_User::fetch($user, true);
+		}
+		if (!$user) {
+			return 0;
+		}
+		if (!isset($exceptSessionId)) {
+			$exceptSessionId = Q_Session::id();
+		}
+		// only the fields we need: a session's content can be sizable, and
+		// remove() below goes by the retrieved row's primary key
+		$sessions = Users_Session::select('id, deviceId')
+			->where(array('userId' => $user->id))
+			->fetchDbRows();
+		$sessionIds = array();
+		foreach ($sessions as $session) {
+			if ($exceptSessionId and $session->id === $exceptSessionId) {
+				continue;
+			}
+			$sessionIds[] = $session->id;
+		}
+		if (!$sessionIds) {
+			return 0;
+		}
+		/**
+		 * Before other sessions of a user are invalidated
+		 * @event Users/logoutOtherSessions {before}
+		 * @param {Users_User} user
+		 * @param {array} sessionIds
+		 * @param {string|false} exceptSessionId
+		 */
+		Q::event('Users/logoutOtherSessions',
+			@compact('user', 'sessionIds', 'exceptSessionId'), 'before'
+		);
+		foreach ($sessions as $session) {
+			if (!in_array($session->id, $sessionIds)) {
+				continue;
+			}
+			// disconnect that session's sockets and clear its push badge
+			Q_Utils::sendToNode(array(
+				"Q/method" => "Users/logout",
+				"sessionId" => $session->id,
+				"userId" => $user->id,
+				"deviceId" => isset($session->deviceId) ? $session->deviceId : null
+			));
+			$session->remove();
+		}
+		// forget the devices registered against those sessions, so a stolen
+		// session can't keep receiving push notifications after the fact
+		Users_Device::delete()->where(array(
+			'userId' => $user->id,
+			'sessionId' => $sessionIds
+		))->execute();
+		/**
+		 * After other sessions of a user have been invalidated
+		 * @event Users/logoutOtherSessions {after}
+		 * @param {Users_User} user
+		 * @param {array} sessionIds
+		 * @param {string|false} exceptSessionId
+		 */
+		Q::event('Users/logoutOtherSessions',
+			@compact('user', 'sessionIds', 'exceptSessionId'), 'after'
+		);
+		return count($sessionIds);
+	}
+
+	/**
 	 * Get the logged-in user's information
 	 * @method loggedInUser
 	 * @static
