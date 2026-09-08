@@ -126,25 +126,70 @@ Users_Email.sendMessage = function (to, subject, view, fields, options, callback
 			var smtpOptions = {
 				host: host
 			};
-			// smtp-connection@2.12 defaulted the unencrypted port to 25;
-			// nodemailer's own client defaults it to 587. Pin 25 explicitly so
-			// removing the shim cannot silently move the port out from under an
-			// existing config, and so the node side keeps agreeing with
-			// Users_Email.php's Zend_Mail_Transport_Smtp (also port 25).
-			smtpOptions.port = smtp.port || 25;
+			// TLS mode. `Users/email/smtp.ssl` is the one config key both halves
+			// of the platform read, and Users_Email.php's Zend_Mail_Protocol_Smtp
+			// defines its meaning: it is a three-valued *string*, not a boolean --
+			//   absent  -> plaintext connection, opportunistic STARTTLS
+			//   "tls"   -> plaintext connection, STARTTLS required
+			//   "ssl"   -> implicit TLS from the first byte
+			// and any other value is an error there.
+			//
+			// GOTCHA (ro#538): until this commit the node side set
+			// `secureConnection`, which is nodemailer 1.x naming that no client
+			// has read since -- neither smtp-connection@2.12 (what the removed
+			// shim bundled) nor nodemailer's own client, both of which read
+			// `secure`. So node ignored `ssl` completely and connected in
+			// plaintext (with opportunistic STARTTLS, the only reason it was not
+			// visibly broken) while PHP honoured it. One config key, two
+			// behaviours. It was also read only when `auth === "login"`, which
+			// PHP never gated on. Both are fixed here.
+			var ssl = (smtp.ssl === true) ? "ssl" : smtp.ssl; // tolerate legacy boolean
+			ssl = ssl ? String(ssl).toLowerCase() : null;
+			switch (ssl) {
+				case null:
+					smtpOptions.secure = false;
+					break;
+				case "tls":
+					smtpOptions.secure = false;
+					smtpOptions.requireTLS = true;
+					break;
+				case "ssl":
+					smtpOptions.secure = true;
+					break;
+				default:
+					// The same failure Zend_Mail_Protocol_Smtp raises for this
+					// value. Throwing beats silently falling back to plaintext
+					// for a config that asked for encryption -- that silence is
+					// exactly how the original bug survived.
+					throw new Q.Exception(
+						smtp.ssl + ' is unsupported SSL type in Users/email/smtp.ssl'
+						+ ' (expected "tls", "ssl", or nothing)'
+					);
+			}
+			// State the port rather than letting the client derive one.
+			// nodemailer picks 465 when `secure` is true and 587 otherwise, so
+			// honouring `ssl` above would otherwise have moved the port as a
+			// side effect. These defaults are Zend's, so the two halves still
+			// agree for a config that sets no port: 465 for implicit TLS, 25
+			// otherwise (including "tls", where STARTTLS runs on the plain port).
+			smtpOptions.port = smtp.port || (smtpOptions.secure ? 465 : 25);
+			// Bound the connect and greeting waits. An implicit-TLS client
+			// pointed at a plaintext listener (mailhog on 1025 is the one we
+			// trip over locally) has to surface an error to the callback rather
+			// than sit on the socket until the caller's own request times out.
+			smtpOptions.connectionTimeout = smtp.connectionTimeout || 15000;
+			smtpOptions.greetingTimeout = smtp.greetingTimeout || 15000;
+			if (smtpOptions.secure
+			&& [25, 587, 1025, 2525].indexOf(Number(smtpOptions.port)) >= 0) {
+				Q.log(
+					'Users/email/smtp: ssl="ssl" (implicit TLS) with port '
+					+ smtpOptions.port + ', a cleartext SMTP port. Expect a TLS'
+					+ ' handshake failure -- use 465, or leave "ssl" unset for a'
+					+ ' plaintext/STARTTLS server such as mailhog.',
+					key
+				);
+			}
 			if (smtp.auth === "login") {
-				if (smtp.ssl) {
-					// GOTCHA: this option is dead, and is preserved verbatim on
-					// purpose. Neither smtp-connection@2.12 (what the shim used)
-					// nor nodemailer's own client ever reads `secureConnection` --
-					// both read `secure` -- so a Users/email/smtp config with
-					// "ssl" set has never actually turned on implicit TLS here.
-					// Renaming it to `secure` is a real behaviour change (it would
-					// flip a live deployment from plaintext to TLS and, with no
-					// port set, from 25 to 465), so it belongs in its own issue
-					// rather than in this shim removal. See ro#530.
-					smtpOptions.secureConnection = true;
-				}
 				smtpOptions.auth = {
 					user: smtp.username,
 					pass: smtp.password
