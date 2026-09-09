@@ -224,7 +224,16 @@ class Users_Contact extends Base_Users_Contact
 		if (empty($userId)) {
 			throw new Q_Exception_RequiredField(array('field' => 'userId'));
 		}
-		if (empty($options['skipAccess']) and $label) {
+		// The access check runs whether or not a $label was supplied (ro#552).
+		// It used to be conditioned on `and $label`, which made the filter the
+		// authorization: omitting "label" from the HTTP query
+		// (Users/contact?userId=<community>) skipped canManageContacts entirely
+		// and returned every contact row of that community -- its whole
+		// membership, with each person's role label -- to any caller, logged in
+		// or not. A narrower request cannot be more privileged than a broader
+		// one. Callers that legitimately read contacts in order to *compute*
+		// authorization pass skipAccess, as they always had to.
+		if (empty($options['skipAccess'])) {
 			$asUserId = Q::ifset($options, 'asUserId', null);
 			if (!$asUserId) {
 				$liu = Users::loggedInUser();
