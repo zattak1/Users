@@ -348,15 +348,64 @@ class Users_Intent extends Base_Users_Intent
 			$this->getInstruction(self::INSTRUCTION_ACCEPTED_BY)
 		);
 		if ($decision === self::ACCEPT_CLAIM) {
-			// first foreign session to arrive consumes the intent
-			$this->setInstruction(
-				self::INSTRUCTION_ACCEPTED_BY,
-				self::sessionFingerprint($sessionId)
-			);
-			$this->save();
-			return true;
+			// first foreign session to arrive consumes the intent - and
+			// "first" is decided by the database, not by this process's
+			// copy of the row. See claimHandoff().
+			return $this->claimHandoff($sessionId);
 		}
 		return $decision === self::ACCEPT_ALLOW;
+	}
+
+	/**
+	 * Record $sessionId as the one session that consumed this intent's single
+	 * handoff, atomically.
+	 *
+	 * acceptDecision() decides from the acceptedBy this process READ. Two
+	 * requests that both load the row before either writes it both see no
+	 * claim, both decide ACCEPT_CLAIM, and a plain save() lets both win:
+	 * Db_Row::save() updates by primary key with no expectation about what the
+	 * row held, so the second write silently overwrites the first and both
+	 * sessions are logged in as the intent's user (ro#593). The one-session
+	 * handoff was safe against sequential replay only.
+	 *
+	 * So the write is a compare-and-set on the serialized instructions column:
+	 *
+	 *     UPDATE users_intent SET instructions = <with acceptedBy>
+	 *     WHERE token = ? AND instructions = <exactly what we read>
+	 *
+	 * MySQL serializes the two updates; exactly one matches its own
+	 * precondition and reports a changed row, the other matches zero rows and
+	 * is refused. No lock, and no extra round trip on the happy path.
+	 *
+	 * @method claimHandoff
+	 * @param {string} $sessionId the session claiming the handoff
+	 * @return {boolean} true if this session now holds the claim; false if
+	 *  another session claimed it between our read and this write, in which
+	 *  case the row in memory is restored to what was read
+	 */
+	function claimHandoff($sessionId)
+	{
+		$before = $this->instructions;
+		$this->setInstruction(
+			self::INSTRUCTION_ACCEPTED_BY,
+			self::sessionFingerprint($sessionId)
+		);
+		$after = $this->instructions;
+		$changed = Users_Intent::update()
+			->set(array('instructions' => $after))
+			->where(array(
+				'token' => $this->token,
+				// a null here (a row never saved through beforeSave)
+				// compares as IS NULL, which is still the exact precondition
+				'instructions' => $before
+			))
+			->execute()
+			->rowCount();
+		if ($changed < 1) {
+			$this->instructions = $before;
+			return false;
+		}
+		return true;
 	}
 
 	/**
