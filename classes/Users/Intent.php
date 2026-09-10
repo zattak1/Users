@@ -385,6 +385,14 @@ class Users_Intent extends Base_Users_Intent
 	 */
 	function claimHandoff($sessionId)
 	{
+		$already = $this->getInstruction(self::INSTRUCTION_ACCEPTED_BY);
+		if ($already !== null && $already !== '') {
+			// Consumed already, as read. acceptDecision() answers ALLOW or
+			// DENY for this case and never asks to claim; refuse here too, so
+			// the one-session guarantee does not rest on the caller's
+			// ordering.
+			return false;
+		}
 		$before = $this->instructions;
 		$this->setInstruction(
 			self::INSTRUCTION_ACCEPTED_BY,
