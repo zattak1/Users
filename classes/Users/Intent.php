@@ -381,7 +381,9 @@ class Users_Intent extends Base_Users_Intent
 	 * @param {string} $sessionId the session claiming the handoff
 	 * @return {boolean} true if this session now holds the claim; false if
 	 *  another session claimed it between our read and this write, in which
-	 *  case the row in memory is restored to what was read
+	 *  case the row in memory is restored to what was read, and left flagged
+	 *  exactly as it was before the attempt - so a refused claim cannot make a
+	 *  later save() write the stale instructions back
 	 */
 	function claimHandoff($sessionId)
 	{
@@ -394,6 +396,13 @@ class Users_Intent extends Base_Users_Intent
 			return false;
 		}
 		$before = $this->instructions;
+		// Restoring $before below goes through Db_Row::__set(), which flags
+		// instructions modified - so a refused claim would leave a later
+		// save() on this same object blind-writing the stale column over the
+		// winner's claim. The per-request query cache makes that the SAME
+		// object the next retrieve() hands out, so it is one request away
+		// (ro#593 audit, R02). Remember the flag and put it back as it was.
+		$wasModified = $this->wasModified('instructions', true);
 		$this->setInstruction(
 			self::INSTRUCTION_ACCEPTED_BY,
 			self::sessionFingerprint($sessionId)
@@ -411,6 +420,9 @@ class Users_Intent extends Base_Users_Intent
 			->rowCount();
 		if ($changed < 1) {
 			$this->instructions = $before;
+			if (!$wasModified) {
+				$this->notModified('instructions');
+			}
 			return false;
 		}
 		return true;
