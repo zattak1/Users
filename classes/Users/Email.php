@@ -148,6 +148,18 @@ class Users_Email extends Base_Users_Email
 					$smtp = array();
 				}
 				if (isset($host)) {
+					// Zend's SMTP client waits up to its RFC 2821 timeouts --
+					// 300s per command, 600s after DATA -- for each reply, so a
+					// slow SMTP host blocks this request for minutes. In ro the
+					// #581 cap (request_terminate_timeout 45s wall-clock) then
+					// SIGTERMs the worker mid-conversation, and whether the MTA
+					// accepted the message is unknowable. Bound the whole
+					// connection instead, so the send fails with an exception
+					// well inside that cap. Overridable as
+					// Users/email/smtp/timeout (seconds; 0 = Zend's own). (ro#729)
+					if (!isset($smtp['timeout'])) {
+						$smtp['timeout'] = 20;
+					}
 					$transport = new Zend_Mail_Transport_Smtp($host, $smtp);
 				} else {
 					$transport = null;
