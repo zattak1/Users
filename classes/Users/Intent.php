@@ -465,7 +465,16 @@ class Users_Intent extends Base_Users_Intent
 		if ($user and !$intent->userId) {
 			$intent->userId = $user->id;
 		}
-		$intent->setInstruction('results', $results);
+		// Not setInstruction() + save(): that rewrites the whole instructions
+		// column from the copy this object was read with, and a foreign
+		// session's handoff claim (acceptedBy, inside that column) may have
+		// landed since - Users/intent PUT reads the row at the top of its
+		// request and reaches here only after authenticating. The claim would
+		// be erased and the spent token claimable again (ro#765). The save()
+		// below then writes only userId and completedTime.
+		if (!$intent->saveInstruction('results', $results)) {
+			return false;
+		}
 		$intent->completedTime = new Db_Expression('CURRENT_TIMESTAMP');
 		$intent->save();
 
@@ -604,6 +613,63 @@ class Users_Intent extends Base_Users_Intent
 		return $this;
 	}
 	
+	/**
+	 * Set one instruction and write it to the database without disturbing any
+	 * other instruction that another request wrote after this row was read.
+	 *
+	 * setInstruction() followed by save() does not do that: instructions is one
+	 * JSON column, and Db_Row::save() writes it back whole by primary key with
+	 * no precondition, so every key some other request added in between - the
+	 * handoff claim under INSTRUCTION_ACCEPTED_BY above all - is silently
+	 * dropped (ro#765). Any code that adds an instruction to an intent that
+	 * may already be live should come through here.
+	 *
+	 * This re-reads the column past the per-request query cache, merges the
+	 * one instruction into THAT, and writes it as a compare-and-set against
+	 * what it re-read - the same discipline as claimHandoff(). A concurrent
+	 * writer landing between the re-read and the write makes it match zero
+	 * rows; it then re-reads and tries once more.
+	 *
+	 * On success this object's instructions become the database's, unflagged,
+	 * so a later save() on it cannot write a stale copy back; any unsaved
+	 * change to instructions it was carrying is superseded.
+	 *
+	 * @method saveInstruction
+	 * @param {string} $instructionName
+	 * @param {mixed} $value
+	 * @return {boolean} true if the database now holds $value under
+	 *  $instructionName; false if the row is gone, or another writer changed
+	 *  instructions under both attempts
+	 */
+	function saveInstruction($instructionName, $value)
+	{
+		for ($attempt = 0; $attempt < 2; ++$attempt) {
+			$fresh = new Users_Intent(array('token' => $this->token));
+			if (!$fresh->retrieve(null, array('ignoreCache' => true, 'caching' => false))) {
+				return false;
+			}
+			$before = $fresh->instructions;
+			$fresh->setInstruction($instructionName, $value);
+			$after = $fresh->instructions;
+			// rowCount() counts CHANGED rows, so an unchanged value would read
+			// as a lost race; there is nothing to write in that case anyway
+			$written = ($after === $before) || Users_Intent::update()
+				->set(array('instructions' => $after))
+				->where(array(
+					'token' => $this->token,
+					'instructions' => $before
+				))
+				->execute()
+				->rowCount() > 0;
+			if ($written) {
+				$this->instructions = $after;
+				$this->notModified('instructions');
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/**
 	 * @method clearInstruction
 	 * @param {string} $instructionName The name of the instruction to remove
