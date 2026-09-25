@@ -158,10 +158,14 @@ function Users_before_Q_objects(&$params)
 			// A notice, not Q_Response::addError(): Q/objects runs before the
 			// dispatcher's Q/errors check, so an error here would replace the
 			// page with the error view instead of rendering it logged out.
-			$text = Q_Text::get('Users/intent');
-			Q_Response::setNotice('Users/intent', Q_Html::text(
-				Q::ifset($text, 'refused', 'UsedOnAnotherDevice', '')
-			));
+			// dontThrow, and an English fallback: a handler deployed ahead of
+			// its text/ tree (a bind overlay cannot add the file) must still
+			// render the page, not turn it into an exception page.
+			$text = Q_Text::get('Users/intent', array('dontThrow' => true));
+			Q_Response::setNotice('Users/intent', Q_Html::text(Q::ifset(
+				$text, 'refused', 'UsedOnAnotherDevice',
+				'This login link has already been used on another device.'
+			)));
 		}
 	}
 }

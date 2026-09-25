@@ -364,7 +364,7 @@ class Users_Intent extends Base_Users_Intent
 	 *
 	 * @method authorizeAcceptingSession
 	 * @param {string} [&$refusal] Set to null when allowed; otherwise to
-	 *   REFUSED_CLAIMED or REFUSED_SESSION - see accept()
+	 *   REFUSED_CLAIMED, REFUSED_SESSION or REFUSED_MISSING - see accept()
 	 * @return {boolean} true if the current session may accept this intent
 	 */
 	function authorizeAcceptingSession(&$refusal = null)
@@ -388,11 +388,9 @@ class Users_Intent extends Base_Users_Intent
 			// first foreign session to arrive consumes the intent - and
 			// "first" is decided by the database, not by this process's
 			// copy of the row. See claimHandoff().
-			if ($this->claimHandoff($sessionId)) {
-				return true;
-			}
-			$refusal = self::REFUSED_CLAIMED; // lost the race to another session
-			return false;
+			// on false, $refusal says whether another session holds the
+			// claim or the row is gone
+			return $this->claimHandoff($sessionId, $refusal);
 		}
 		if ($decision === self::ACCEPT_ALLOW) {
 			return true;
@@ -425,55 +423,95 @@ class Users_Intent extends Base_Users_Intent
 	 * precondition and reports a changed row, the other matches zero rows and
 	 * is refused. No lock, and no extra round trip on the happy path.
 	 *
+	 * The precondition is the whole column, so a zero-row match only says
+	 * that SOMETHING wrote instructions since our read - not that another
+	 * session claimed the handoff. A complete() storing its results does it
+	 * too (ro#829). So a miss re-reads the row, uncached, once: a claim on
+	 * record for another session is a real loss; a claim on record for THIS
+	 * session (its own concurrent request won) is a success; no claim at all
+	 * means a non-claim writer got in first, and the claim is retried once
+	 * against the bytes just re-read. Every success is still a compare-and-set
+	 * against a column that held no claim, so a second session never wins.
+	 *
 	 * @method claimHandoff
 	 * @param {string} $sessionId the session claiming the handoff
+	 * @param {string} [&$refusal] on false: REFUSED_MISSING if the row is gone
+	 *  (e.g. an expired row deleted by beforeSave()'s cleanup), otherwise
+	 *  REFUSED_CLAIMED; null on true
 	 * @return {boolean} true if this session now holds the claim; false if
-	 *  another session claimed it between our read and this write, in which
-	 *  case the row in memory is restored to what was read, and left flagged
-	 *  exactly as it was before the attempt - so a refused claim cannot make a
-	 *  later save() write the stale instructions back
+	 *  another session holds it (or the row is gone, or two non-claim writes
+	 *  landed back to back), in which case the row in memory is restored to
+	 *  what was read, and left flagged exactly as it was before the attempt -
+	 *  so a refused claim cannot make a later save() write the stale
+	 *  instructions back
 	 */
-	function claimHandoff($sessionId)
+	function claimHandoff($sessionId, &$refusal = null)
 	{
+		$refusal = null;
 		$already = $this->getInstruction(self::INSTRUCTION_ACCEPTED_BY);
 		if ($already !== null && $already !== '') {
 			// Consumed already, as read. acceptDecision() answers ALLOW or
 			// DENY for this case and never asks to claim; refuse here too, so
 			// the one-session guarantee does not rest on the caller's
 			// ordering.
+			$refusal = self::REFUSED_CLAIMED;
 			return false;
 		}
-		$before = $this->instructions;
-		// Restoring $before below goes through Db_Row::__set(), which flags
+		$read = $this->instructions;
+		// Restoring $read below goes through Db_Row::__set(), which flags
 		// instructions modified - so a refused claim would leave a later
 		// save() on this same object blind-writing the stale column over the
 		// winner's claim. The per-request query cache makes that the SAME
 		// object the next retrieve() hands out, so it is one request away
 		// (ro#593 audit, R02). Remember the flag and put it back as it was.
 		$wasModified = $this->wasModified('instructions', true);
-		$this->setInstruction(
-			self::INSTRUCTION_ACCEPTED_BY,
-			self::sessionFingerprint($sessionId)
-		);
-		$after = $this->instructions;
-		$changed = Users_Intent::update()
-			->set(array('instructions' => $after))
-			->where(array(
-				'token' => $this->token,
-				// a null here (a row never saved through beforeSave)
-				// compares as IS NULL, which is still the exact precondition
-				'instructions' => $before
-			))
-			->execute()
-			->rowCount();
-		if ($changed < 1) {
+		$mine = self::sessionFingerprint($sessionId);
+		$before = $read;
+		for ($attempt = 0; $attempt < 2; ++$attempt) {
 			$this->instructions = $before;
-			if (!$wasModified) {
-				$this->notModified('instructions');
+			$this->setInstruction(self::INSTRUCTION_ACCEPTED_BY, $mine);
+			$after = $this->instructions;
+			$changed = Users_Intent::update()
+				->set(array('instructions' => $after))
+				->where(array(
+					'token' => $this->token,
+					// a null here (a row never saved through beforeSave)
+					// compares as IS NULL, which is still the exact precondition
+					'instructions' => $before
+				))
+				->execute()
+				->rowCount();
+			if ($changed > 0) {
+				return true;
 			}
-			return false;
+			// Missed: instructions changed since $before. Was it a claim?
+			$fresh = new Users_Intent(array('token' => $this->token));
+			if (!$fresh->retrieve(null, array('ignoreCache' => true, 'caching' => false))) {
+				$refusal = self::REFUSED_MISSING;
+				break;
+			}
+			$holder = $fresh->getInstruction(self::INSTRUCTION_ACCEPTED_BY);
+			if ($holder !== null && $holder !== '') {
+				if (hash_equals((string)$holder, $mine)) {
+					// this session's own concurrent request claimed it
+					$this->instructions = $fresh->instructions;
+					if (!$wasModified) {
+						$this->notModified('instructions');
+					}
+					return true;
+				}
+				break; // another session holds it
+			}
+			$before = $fresh->instructions; // a non-claim write: retry on it
 		}
-		return true;
+		$this->instructions = $read;
+		if (!$wasModified) {
+			$this->notModified('instructions');
+		}
+		if (!$refusal) {
+			$refusal = self::REFUSED_CLAIMED;
+		}
+		return false;
 	}
 
 	/**
@@ -715,6 +753,8 @@ class Users_Intent extends Base_Users_Intent
 				return true;
 			}
 		}
+		// Never the token: it is a live login credential until endTime.
+		Q::log("Users_Intent::saveInstruction gave up: $instructionName on action {$this->action} after 2 attempts");
 		return false;
 	}
 
