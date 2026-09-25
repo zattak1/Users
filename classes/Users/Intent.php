@@ -182,23 +182,36 @@ class Users_Intent extends Base_Users_Intent
 	 *   NOTE: this no longer makes the token a replayable bearer login - see
 	 *   {{#crossLink "Users_Intent/authorizeAcceptingSession"}}{{/crossLink}},
 	 *   which is enforced on every accept whether or not this option is passed.
+	 * @param {string} [&$refusal] Set to null on success, or on refusal to one of
+	 *   the REFUSED_* constants saying why - so a caller can tell the device
+	 *   that lost a handoff why it is not logged in (REFUSED_CLAIMED) without
+	 *   treating every refusal alike. It never says which session holds a claim.
 	 * @return {boolean} true if successful, false otherwise
 	 */
-	function accept($options = array())
+	function accept($options = array(), &$refusal = null)
 	{
+		$refusal = null;
 		$intent = $this;
 		if (false === Q::event('Users/intent/accept', compact('intent', 'options'), 'before')) {
+			$refusal = self::REFUSED_BY_HANDLER;
 			return false;
 		}
-		if ((!$intent->wasRetrieved() and !$intent->retrieve())
-		or Users::db()->fromDateTime($intent->endTime) < time()
-		or (empty($options['evenIfCompleted']) and !empty($intent->completedTime))) {
+		if (!$intent->wasRetrieved() and !$intent->retrieve()) {
+			$refusal = self::REFUSED_MISSING;
+			return false;
+		}
+		if (Users::db()->fromDateTime($intent->endTime) < time()) {
+			$refusal = self::REFUSED_EXPIRED;
+			return false;
+		}
+		if (empty($options['evenIfCompleted']) and !empty($intent->completedTime)) {
+			$refusal = self::REFUSED_COMPLETED;
 			return false;
 		}
 		// SECURITY: the token alone is not enough. It only logs in the session
 		// that opened the intent, or - for actions that declare "handoff" - the
 		// first other session it is handed to. See authorizeAcceptingSession().
-		if (!$intent->authorizeAcceptingSession()) {
+		if (!$intent->authorizeAcceptingSession($refusal)) {
 			return false;
 		}
 		$userId = $content = $session = null;
@@ -243,6 +256,26 @@ class Users_Intent extends Base_Users_Intent
 	const ACCEPT_ALLOW = 1;
 	/** This session may be logged in, and consumes the intent's one handoff. */
 	const ACCEPT_CLAIM = 2;
+
+	/*
+	 * Why accept() refused (ro#766). Strings rather than integers, so that a
+	 * refusal is never confused with an ACCEPT_* decision and reads as itself
+	 * in a log line.
+	 */
+	/** A Users/intent/accept "before" handler returned false. */
+	const REFUSED_BY_HANDLER = 'handler';
+	/** The intent is not in the database. */
+	const REFUSED_MISSING = 'missing';
+	/** The intent's endTime has passed. */
+	const REFUSED_EXPIRED = 'expired';
+	/** The intent was completed and evenIfCompleted was not passed. */
+	const REFUSED_COMPLETED = 'completed';
+	/** This session may never accept this intent: not the one that opened it,
+	 *  and the action does not declare "handoff" (or no session at all). */
+	const REFUSED_SESSION = 'session';
+	/** The intent's one handoff was consumed by another session - read that
+	 *  way, or lost to it in a race at the claim write. */
+	const REFUSED_CLAIMED = 'claimed';
 
 	/**
 	 * The acceptance policy, as a pure function - see
@@ -330,10 +363,13 @@ class Users_Intent extends Base_Users_Intent
 	 * the kind that has to be pinned.
 	 *
 	 * @method authorizeAcceptingSession
+	 * @param {string} [&$refusal] Set to null when allowed; otherwise to
+	 *   REFUSED_CLAIMED or REFUSED_SESSION - see accept()
 	 * @return {boolean} true if the current session may accept this intent
 	 */
-	function authorizeAcceptingSession()
+	function authorizeAcceptingSession(&$refusal = null)
 	{
+		$refusal = null;
 		// Q_Session::id() is '' until a session has started, and the Telegram
 		// bot path starts an internal session before accepting, so try it
 		// first and fall back to what the client presented.
@@ -341,19 +377,31 @@ class Users_Intent extends Base_Users_Intent
 		if (!$sessionId) {
 			$sessionId = Q_Session::requestedId();
 		}
+		$acceptedBy = $this->getInstruction(self::INSTRUCTION_ACCEPTED_BY);
 		$decision = self::acceptDecision(
 			$this->action,
 			$this->sessionId,
 			$sessionId,
-			$this->getInstruction(self::INSTRUCTION_ACCEPTED_BY)
+			$acceptedBy
 		);
 		if ($decision === self::ACCEPT_CLAIM) {
 			// first foreign session to arrive consumes the intent - and
 			// "first" is decided by the database, not by this process's
 			// copy of the row. See claimHandoff().
-			return $this->claimHandoff($sessionId);
+			if ($this->claimHandoff($sessionId)) {
+				return true;
+			}
+			$refusal = self::REFUSED_CLAIMED; // lost the race to another session
+			return false;
 		}
-		return $decision === self::ACCEPT_ALLOW;
+		if ($decision === self::ACCEPT_ALLOW) {
+			return true;
+		}
+		// DENY with a claim on record can only mean the claim is someone
+		// else's: acceptDecision() ALLOWs the session it fingerprints, and only
+		// handoff actions ever carry one.
+		$refusal = $acceptedBy ? self::REFUSED_CLAIMED : self::REFUSED_SESSION;
+		return false;
 	}
 
 	/**

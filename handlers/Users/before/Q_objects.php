@@ -146,10 +146,22 @@ function Users_before_Q_objects(&$params)
 		// still received the intent's instructions - which for Assets/charge
 		// carry the payer's userId, the community, the reason and the amount.
 		// A token holder who may not accept has no business seeing any of it.
+		$refusal = null;
 		if ($intent->accept(array(
 			'evenIfCompleted' => true
-		))) { // authenticates this session, and logs user in
+		), $refusal)) { // authenticates this session, and logs user in
 			Q_Response::setScriptData('Q.plugins.Users.intent', $intent->exportArray());
+		} else if ($refusal === Users_Intent::REFUSED_CLAIMED) {
+			// The device that lost the handoff was left on a logged-out page
+			// with no reason given, so theft looked like a broken QR code
+			// (ro#766). Say the link is spent - never which session spent it.
+			// A notice, not Q_Response::addError(): Q/objects runs before the
+			// dispatcher's Q/errors check, so an error here would replace the
+			// page with the error view instead of rendering it logged out.
+			$text = Q_Text::get('Users/intent');
+			Q_Response::setNotice('Users/intent', Q_Html::text(
+				Q::ifset($text, 'refused', 'UsedOnAnotherDevice', '')
+			));
 		}
 	}
 }
