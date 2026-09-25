@@ -1078,9 +1078,11 @@ abstract class Users extends Base_Users
 			}
 			throw $e;
 		}
-		// Only now tell node. Losing any of these degrades safely: the rows
-		// are gone, so that socket's next authenticated action fails anyway,
-		// and repeating one for a session that is already gone is harmless.
+		// Only now tell node. Losing any of these degrades safely for HTTP:
+		// the rows are gone, so that session's next request is logged out.
+		// The socket is a separate matter - see ro#826: node admits a socket
+		// on its signed capability, not on the session row, so this message
+		// is a courtesy disconnect, not a revocation, with or without ro#728.
 		foreach ($ending as $session) {
 			// disconnect that session's sockets and clear its push badge
 			Q_Utils::sendToNode(array(
