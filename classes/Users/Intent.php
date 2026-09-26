@@ -684,16 +684,32 @@ class Users_Intent extends Base_Users_Intent
 	}
 	
 	/**
+	 * Set one instruction, or several, in memory. Writes nothing to the
+	 * database; see saveInstruction() before pairing this with save() on an
+	 * intent that may already be live.
+	 *
+	 * The array form was documented but not implemented: $value was required
+	 * and the name was used as an array key, so Users/recover (its one
+	 * caller) threw ArgumentCountError after it had already resumed the
+	 * session (ro#820). This is upstream Qbix/Users f89607f's body.
+	 *
 	 * @method setInstruction
 	 * @param {string|array} $instructionName The name of the instruction to set,
 	 *  or an array of $instructionName => $value pairs
-	 * @param {mixed} $value The value to set the instruction to
-	 * @return Streams_Message
+	 * @param {mixed} [$value=null] The value to set the instruction to;
+	 *  ignored when $instructionName is an array
+	 * @return {Users_Intent}
 	 */
-	function setInstruction($instructionName, $value)
+	function setInstruction($instructionName, $value = null)
 	{
 		$instr = $this->getAllInstructions();
-		$instr[$instructionName] = $value;
+		if (is_array($instructionName)) {
+			foreach ($instructionName as $k => $v) {
+				$instr[$k] = $v;
+			}
+		} else {
+			$instr[$instructionName] = $value;
+		}
 		$this->instructions = Q::json_encode($instr, Q::JSON_FORCE_OBJECT);
 
 		return $this;

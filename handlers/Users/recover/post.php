@@ -74,6 +74,12 @@ function Users_recover_post()
 	// Step 4 — mark the intent as recovered
 	$gcMax = intval(ini_get('session.gc_maxlifetime'));
 
+	// The array form of setInstruction() only works since ro#820; before it,
+	// this line threw after Step 3 had already switched the session.
+	// A plain save() rather than saveInstruction() is deliberate: this row's
+	// token is a 40-hex HMAC of the recovery key, never a letters-only
+	// Users/authenticate token, and neither action it carries declares
+	// "handoff", so no acceptedBy claim can be on it for save() to erase (ro#765).
 	$intent->action = 'Users.recoverSession';
 	$intent->setInstruction(array(
 		'recoveryKey' => $recoveryKey,
