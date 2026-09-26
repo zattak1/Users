@@ -689,9 +689,10 @@ class Users_Intent extends Base_Users_Intent
 	 * intent that may already be live.
 	 *
 	 * The array form was documented but not implemented: $value was required
-	 * and the name was used as an array key, so Users/recover (its one
-	 * caller) threw ArgumentCountError after it had already resumed the
-	 * session (ro#820). This is upstream Qbix/Users f89607f's body.
+	 * and the name was used as an array key, so Users/recover's Step 4 (its
+	 * one array caller) would throw ArgumentCountError (ro#820). It was never
+	 * reached: Step 3 fails first (ro#860). This is upstream Qbix/Users
+	 * f89607f's body.
 	 *
 	 * @method setInstruction
 	 * @param {string|array} $instructionName The name of the instruction to set,
