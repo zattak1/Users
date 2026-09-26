@@ -75,11 +75,14 @@ function Users_recover_post()
 	$gcMax = intval(ini_get('session.gc_maxlifetime'));
 
 	// The array form of setInstruction() only works since ro#820; before it,
-	// this line threw after Step 3 had already switched the session.
+	// this line would throw ArgumentCountError. It has never been reached:
+	// the dispatcher has already started a session, so Step 3's session_id()
+	// is refused and the handler throws "Could not resume session" first.
+	// See ro#860 for Step 3 (and the unverified recovery signature).
 	// A plain save() rather than saveInstruction() is deliberate: this row's
-	// token is a 40-hex HMAC of the recovery key, never a letters-only
-	// Users/authenticate token, and neither action it carries declares
-	// "handoff", so no acceptedBy claim can be on it for save() to erase (ro#765).
+	// token is an HMAC under Q/internal/secret that only the server can
+	// compute, and neither action it carries declares "handoff", so no
+	// acceptedBy claim can be on it for save() to erase (ro#765).
 	$intent->action = 'Users.recoverSession';
 	$intent->setInstruction(array(
 		'recoveryKey' => $recoveryKey,
