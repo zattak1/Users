@@ -30,7 +30,7 @@ class Users_Mobile extends Base_Users_Mobile
 	 * @param {array} $fields=array()
 	 *  The fields referenced in the subject and/or view
 	 * @param {array} [$options=array()]
-	 * @param {string} [$options.delay] A delay, in milliseconds, to wait until sending email. Only works if Node server is listening.
+	 * @param {string} [$options.delay] Ignored: the message is sent now. (It used to be handed to Node, which never sent it.)
 	 * @param {string} [$options.language] Preferred language
 	 * @return {boolean}
 	 * @throws {Q_Exception_WrongType}
@@ -69,18 +69,12 @@ class Users_Mobile extends Base_Users_Mobile
 			return $result;
 		}
 
+		// $options['delay'] used to hand the message to Node's
+		// Users/sendMessage instead, which never sent anything (it called an
+		// undeclared function), while sendToNode() returning true -- the IPC
+		// write succeeded -- skipped the send below: the message was lost.
+		// That hand-off is retired; the message is always sent here.
 		$sent = false;
-		if (!empty($options['delay'])) {
-			// Try to use Node.js to send the message
-			$sent = Q_Utils::sendToNode(array(
-				"Q/method" => "Users/sendMessage",
-				"delay" => $options['delay'],
-				"mobileNumber" => $number,
-				"body" => $body,
-				"options" => $options
-			));
-		}
-		
 		if (!$sent) {
 			$from = Q::ifset($options, 'from', Q_Config::get('Users', 'mobile', 'from', null));
 			if (!isset($from)) {

@@ -36,7 +36,7 @@ class Users_Email extends Base_Users_Email
 	 * @param {array} [$options=array()] Array of options. Can include:
 	 * @param {array} [$options.name] A human-readable name in addition to the address to send to.
 	 * @param {array} [$options.from] An array of (emailAddress, humanReadableName)
-	 * @param {array} [$options.delay] A delay, in milliseconds, to wait until sending email. Only works if Node server is listening.
+	 * @param {array} [$options.delay] Ignored: the message is sent now. (It used to be handed to Node, which never sent it.)
 	 * @param {string} [$options.language] Preferred language to be used for the view
 	 * @param {array} [$options.html="Q/layout/email.php"] Preferred view file to use for HTML layout. Pass true to send HTML without a layout. Pass false for no HTML.
 	 * @param {array} [$options.title] Optionally set a different title for an HTML email, otherwise subject is used.
@@ -120,19 +120,13 @@ class Users_Email extends Base_Users_Email
 			return $result;
 		}
 		
+		// $options['delay'] used to hand the message to Node's
+		// Users/sendMessage instead, which never sent anything (it called an
+		// undeclared function), while sendToNode() returning true -- the IPC
+		// write succeeded -- skipped the send below: the message was lost.
+		// That hand-off is retired; the message is always sent here, where
+		// the Users/email/sendMessage/email hook and the HTML layout apply.
 		$sent = false;
-		if (!empty($options['delay'])) {
-			// Try to use Node.js to send the message
-			$sent = Q_Utils::sendToNode(array(
-				"Q/method" => "Users/sendMessage",
-				"delay" => $options['delay'],
-				"emailAddress" => $emailAddress,
-				"subject" => $subject,
-				"body" => $body,
-				"options" => $options
-			));
-		}
-		
 		if (!$sent) {
 			// Set up the default mail transport
 			$smtp = Q_Config::get('Users', 'email', 'smtp', array('host' => 'sendmail'));
