@@ -334,7 +334,11 @@
 			   (Users::logoutOtherSessions). Only turn this off if an app has
 			   a deliberate reason to leave old session cookies working after
 			   a password reset - see ro#546. */
-			"invalidateOthersOnPassphraseChange": true
+			"invalidateOthersOnPassphraseChange": true,
+			/* replacing an email address or mobile number does the same:
+			   the identifier is how the account is logged into and recovered,
+			   so a session that swaps it must not keep its foothold - ro#548. */
+			"invalidateOthersOnIdentifierChange": true
 		},
 		"intents": {
 			"actions": {

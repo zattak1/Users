@@ -53,14 +53,37 @@ function Users_activate_post()
 	}
 
 	if ($type) {
+		// What the account was reachable by before this call. Read it first:
+		// setEmailAddress() / setMobileNumber() overwrite the user's field.
+		$previousEmail = $user->emailAddress;
+		$previousMobile = $user->mobileNumber;
 		if ($type == 'email address') {
-			$user->setEmailAddress($email->address, true); // may throw exception	
+			$user->setEmailAddress($email->address, true); // may throw exception
+			$replaced = $previousEmail
+				&& strtolower(trim($previousEmail)) !== strtolower(trim($email->address));
 		} else if ($type == 'mobile number') {
 			$user->setMobileNumber($mobile->number, true); // may throw exception
+			$replaced = $previousMobile && trim($previousMobile) !== trim($mobile->number);
 		}
 		// Log the user in, since they have just added an email to their account
 		$activated = Q::interpolate($text['notifications']['IdentifierActivated'], @compact('type'));
 		Users::setLoggedInUser($user); // This also saves the user.
+
+		// Replacing a login identifier is a credential event: the identifier is
+		// what Users/login matches on and what recovery is sent to, so whoever
+		// controls it controls the account. An attacker holding only a session
+		// could otherwise swap it and keep their foothold. Only a *replacement*
+		// counts - the first identifier (registration) has nothing to protect.
+		// The current session was regenerated above and is kept. See ro#548.
+		if (!empty($replaced)) {
+			if (Q_Config::get('Users', 'session', 'invalidateOthersOnIdentifierChange', true)) {
+				Users::logoutOtherSessions($user, Q_Session::id());
+			}
+			// Tell the owner at the email address they had before, so a change
+			// they did not make is noticed. For a mobile change that is the
+			// email they still have. Never fails the activation.
+			Users_activate_notifyIdentifierChanged($user, $type, $previousEmail);
+		}
 		Q_Response::removeNotice('Users/activate/objects');
 		Q_Response::setNotice("Users/activate/activated", $activated, array(
 			'timeout' => Q_Config::get('Users', 'notices', 'timeout', 5)
@@ -74,4 +97,37 @@ function Users_activate_post()
 	
 	Users::$cache['passphrase_set'] = true;
 	Users::$cache['success'] = true;
+}
+
+/**
+ * Mail the address an account was reachable at before an identifier change.
+ * Best effort: a mail failure is logged, never thrown, because the change has
+ * already happened and the user must not be told it failed. See ro#548.
+ * @param {Users_User} $user
+ * @param {string} $type "email address" or "mobile number"
+ * @param {string|null} $previousEmail where to send it; nothing is sent if empty
+ */
+function Users_activate_notifyIdentifierChanged($user, $type, $previousEmail)
+{
+	if (empty($previousEmail)) {
+		return;
+	}
+	try {
+		$to = new Users_Email();
+		$to->address = $previousEmail;
+		$to->sendMessage(
+			Q_Config::get('Users', 'transactional', 'identifierChanged', 'subject',
+				"Your sign-in $type was changed"),
+			Q_Config::get('Users', 'transactional', 'identifierChanged', 'body',
+				'Users/email/identifierChanged.php'),
+			array(
+				'user' => $user,
+				'type' => $type,
+				'communityName' => Users::communityName()
+			)
+		);
+	} catch (Exception $e) {
+		Q::log("Users/activate: could not notify $previousEmail of a $type change: "
+			. $e->getMessage(), 'Users');
+	}
 }
