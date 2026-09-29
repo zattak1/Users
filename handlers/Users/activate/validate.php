@@ -17,6 +17,15 @@ function Users_activate_validate()
 			'range'	=> 'a valid phone number'
 		), 'mobileNumber');
 	}
+	// ro#917: a JSON body reaches $_REQUEST with its types intact, so "code": true
+	// is non-empty and loosely equals any stored code. Only a string or integer
+	// can be a code; reject everything else before any comparison.
+	if (isset($_REQUEST['code']) and !is_string($_REQUEST['code']) and !is_int($_REQUEST['code'])) {
+		throw new Q_Exception_WrongType(array(
+			'field' => 'code',
+			'type' => 'string'
+		), 'code');
+	}
 	if (Q_Request::method() === 'POST' and empty($_REQUEST['code'])) {
 		Q_Response::addError(
 			new Q_Exception("The activation code is required")

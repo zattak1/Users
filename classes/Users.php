@@ -972,6 +972,35 @@ abstract class Users extends Base_Users
 	}
 
 	/**
+	 * Whether a submitted activation code equals the stored one.
+	 *
+	 * Exact, constant-time, and type-strict: only a string or integer can match,
+	 * and an empty stored code (already consumed, or never issued) never does.
+	 * The former loose `!=` accepted a JSON boolean `true` for any code (ro#917).
+	 *
+	 * @method activationCodeMatches
+	 * @static
+	 * @param {string|integer} $stored The code on the Users_Email / Users_Mobile row
+	 * @param {mixed} $given The code taken from the request
+	 * @return {boolean}
+	 */
+	static function activationCodeMatches($stored, $given)
+	{
+		if (!is_string($given) and !is_int($given)) {
+			return false;
+		}
+		if (!is_string($stored) and !is_int($stored)) {
+			return false;
+		}
+		$stored = (string)$stored;
+		$given = (string)$given;
+		if ($stored === '') {
+			return false;
+		}
+		return hash_equals($stored, $given);
+	}
+
+	/**
 	 * Invalidates every server-side session belonging to a user, except
 	 * (optionally) one. Use this on credential changes: until this is called,
 	 * a session cookie copied from a lost phone, a shared laptop or a backup
