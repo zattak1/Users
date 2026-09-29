@@ -490,9 +490,10 @@ class Users_User extends Base_Users_User
 		and $email->state !== 'unverified') {
 			if ($email->userId === $this->id) {
 				$current = $this->emailAddress;
-				if ($current and strtolower(trim($current)) !== strtolower(trim($normalized))) {
-					// Choosing a retained address as the new primary replaces
-					// the one the account signs in with. That needs the same
+				if (strtolower(trim((string)$current)) !== strtolower(trim($normalized))) {
+					// Choosing a retained address as the primary - replacing one,
+					// or filling the field after a removal - changes what the
+					// account signs in with. That needs the same
 					// proof of control as a new address, so send a fresh code
 					// and leave the primary alone until it is followed (ro#548,
 					// audit R02). The row keeps its verified state meanwhile.
@@ -813,7 +814,7 @@ class Users_User extends Base_Users_User
 		and $mobile->state !== 'unverified') {
 			if ($mobile->userId === $this->id) {
 				$current = $this->mobileNumber;
-				if ($current and trim($current) !== trim($normalized)) {
+				if (trim((string)$current) !== trim($normalized)) {
 					// See addEmail: replacing the primary needs a fresh proof
 					// of control, not an immediate switch (ro#548, audit R02).
 					$reverify = true;
