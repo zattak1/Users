@@ -185,18 +185,20 @@ Users.listen = function (options) {
 		});
 	});
 
-	// Users/sendMessage — send a view-rendered message via email/SMS.
-	//
-	// NOTE: the legacy handler references an undeclared function `_send`.
-	// This is preserved verbatim from the original switch case — if the
-	// code path is ever exercised it will throw ReferenceError, exactly as
-	// before. Define `_send` in scope if you want this to actually work.
+	// Users/sendMessage — RETIRED. It was the receiving end of PHP's
+	// Users_Email::sendMessage() / Users_Mobile::sendMessage() with
+	// options.delay, but both of its branches called an undeclared `_send`,
+	// so every call threw ReferenceError and sent nothing. PHP could not tell:
+	// Q_Utils::sendToNode() reports that the IPC write succeeded, not that
+	// Node sent anything, so a reachable Node suppressed PHP's own send and
+	// the message was lost. PHP now sends inline whatever the delay, which
+	// also keeps its interception hooks and HTML layout. This stays
+	// registered so a caller still using it gets a log line, not an
+	// unknown-method error; it sends nothing.
 	server.addMethod('Users/sendMessage', function (parsed) {
-		if (parsed.delay) {
-			setTimeout(_send, parsed.delay);
-		} else {
-			_send();
-		}
+		Q.log('Users/sendMessage is retired and nothing was sent'
+			+ (parsed.mobileNumber ? ' (a mobile message)' : ' (an email)')
+			+ ': send it from PHP without handing it to Node');
 	});
 
 	// Users/addEventListener — attach an external callback to a socket event.
