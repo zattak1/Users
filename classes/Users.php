@@ -1001,6 +1001,98 @@ abstract class Users extends Base_Users
 	}
 
 	/**
+	 * Gives the current session a new id and ends the old one, even when the
+	 * user is already logged in on it. setLoggedInUser() returns early for a
+	 * user who is already logged in, so it never rotates the id; a change to
+	 * how the account is reached must not leave a cookie copied before the
+	 * change working afterwards (ro#548, audit R04).
+	 *
+	 * @method rotateSession
+	 * @static
+	 * @param {Users_User} $user The logged-in user
+	 * @return {string|null} The new session id, or null if the session is internal
+	 */
+	static function rotateSession($user)
+	{
+		$session = new Users_Session();
+		$session->id = Q_Session::id();
+		$duration = null;
+		if ($session->id and $session->retrieve()) {
+			$duration = $session->duration;
+		}
+		$internalSessionIdPrefix = Q_Config::get(
+			'Q', 'session', 'id', 'prefixes', 'internal', 'sessionId_internal_'
+		);
+		if (Q::startsWith($session->id, $internalSessionIdPrefix)) {
+			return null;
+		}
+		$sessionId = Q_Session::regenerateId(true, $duration, 'authenticated');
+		Q_Session::setNonce();
+		$user->sessionId = $sessionId;
+		$user->save();
+		return $sessionId;
+	}
+
+	/**
+	 * What replacing (or removing) a login identifier owes the account: end
+	 * the user's other sessions, and tell the address they had before. One
+	 * place, so the activate, resend and delete paths cannot drift (ro#548).
+	 * Never throws for a mail failure: the change has already happened.
+	 *
+	 * @method identifierCredentialEvent
+	 * @static
+	 * @param {Users_User} $user
+	 * @param {string} $type "email address" or "mobile number"
+	 * @param {string|null} $previousEmail Where to send the warning; none if empty
+	 * @param {boolean} [$rotate=false] Also rotate the current session id
+	 */
+	static function identifierCredentialEvent($user, $type, $previousEmail, $rotate = false)
+	{
+		if ($rotate) {
+			self::rotateSession($user);
+		}
+		if (Q_Config::get('Users', 'session', 'invalidateOthersOnIdentifierChange', true)) {
+			self::logoutOtherSessions($user, Q_Session::id());
+		}
+		self::notifyIdentifierChanged($user, $type, $previousEmail);
+	}
+
+	/**
+	 * Mail the address an account was reachable at before an identifier change.
+	 * Best effort: a mail failure is logged, never thrown. See ro#548.
+	 *
+	 * @method notifyIdentifierChanged
+	 * @static
+	 * @param {Users_User} $user
+	 * @param {string} $type "email address" or "mobile number"
+	 * @param {string|null} $previousEmail nothing is sent if empty
+	 */
+	static function notifyIdentifierChanged($user, $type, $previousEmail)
+	{
+		if (empty($previousEmail)) {
+			return;
+		}
+		try {
+			$to = new Users_Email();
+			$to->address = $previousEmail;
+			$to->sendMessage(
+				Q_Config::get('Users', 'transactional', 'identifierChanged', 'subject',
+					"Your sign-in $type was changed"),
+				Q_Config::get('Users', 'transactional', 'identifierChanged', 'body',
+					'Users/email/identifierChanged.php'),
+				array(
+					'user' => $user,
+					'type' => $type,
+					'communityName' => self::communityName()
+				)
+			);
+		} catch (Exception $e) {
+			Q::log("Users: could not notify $previousEmail of a $type change: "
+				. $e->getMessage(), 'Users');
+		}
+	}
+
+	/**
 	 * Invalidates every server-side session belonging to a user, except
 	 * (optionally) one. Use this on credential changes: until this is called,
 	 * a session cookie copied from a lost phone, a shared laptop or a backup

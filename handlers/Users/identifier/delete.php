@@ -12,5 +12,29 @@ function Users_identifier_delete()
 		);
 	}
 
+	// Removing the identifier the account signs in with is a credential event
+	// (ro#548, audit R03). Read what it was reachable by first: once it is
+	// removed the primary field is empty, and a later add would look like a
+	// first registration and skip every safeguard.
+	$previousEmail = $user->emailAddress;
+	$wasPrimary = false;
+	if ($type === 'email') {
+		Q_Valid::email($identifier, $normalized);
+		$wasPrimary = $previousEmail
+			&& strtolower(trim($previousEmail)) === strtolower(trim($normalized));
+	} else if ($type === 'mobile') {
+		Q_Valid::phone($identifier, $normalized);
+		$wasPrimary = $user->mobileNumber && trim($user->mobileNumber) === trim($normalized);
+	}
+
 	$user->removeIdentifier($identifier);
+
+	if ($wasPrimary) {
+		Users::identifierCredentialEvent(
+			$user,
+			$type === 'email' ? 'email address' : 'mobile number',
+			$previousEmail,
+			true
+		);
+	}
 }

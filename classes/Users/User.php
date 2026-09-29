@@ -485,19 +485,31 @@ class Users_User extends Base_Users_User
 		}
 		$email = new Users_Email();
 		$email->address = $normalized;
+		$reverify = false;
 		if ($email->retrieve(null, array('ignoreCache' => true))
 		and $email->state !== 'unverified') {
 			if ($email->userId === $this->id) {
-				$email->set('user', $this);
-				$this->setEmailAddress($emailAddress, true);
-				return $email;
+				$current = $this->emailAddress;
+				if ($current and strtolower(trim($current)) !== strtolower(trim($normalized))) {
+					// Choosing a retained address as the new primary replaces
+					// the one the account signs in with. That needs the same
+					// proof of control as a new address, so send a fresh code
+					// and leave the primary alone until it is followed (ro#548,
+					// audit R02). The row keeps its verified state meanwhile.
+					$reverify = true;
+				} else {
+					$email->set('user', $this);
+					$this->setEmailAddress($emailAddress, true);
+					return $email;
+				}
+			} else {
+				// Otherwise, say it's verified for another user,
+				// even if it unsubscribed or was suspended.
+				throw new Users_Exception_AlreadyVerified(array(
+					'key' => 'email address',
+					'userId' => $email->userId
+				), 'emailAddress');
 			}
-			// Otherwise, say it's verified for another user,
-			// even if it unsubscribed or was suspended.
-			throw new Users_Exception_AlreadyVerified(array(
-				'key' => 'email address',
-				'userId' => $email->userId
-			), 'emailAddress');
 		}
 		
 		$user = $this;
@@ -507,7 +519,9 @@ class Users_User extends Base_Users_User
 		// In either event, update the record in the database,
 		// and re-send the email.
 		$minutes = Q_Config::get('Users', 'activation', 'expires', 60*24*7);
-		$email->state = 'unverified';
+		if (!$reverify) {
+			$email->state = 'unverified';
+		}
 		$email->userId = $this->id;
 		$email->activationCode = random_int(1000000, 9999999);
 		$email->activationCodeExpires = new Db_Expression(
@@ -794,19 +808,28 @@ class Users_User extends Base_Users_User
 		}
 		$mobile = new Users_Mobile();
 		$mobile->number = $normalized;
+		$reverify = false;
 		if ($mobile->retrieve(null, array('ignoreCache' => true))
 		and $mobile->state !== 'unverified') {
 			if ($mobile->userId === $this->id) {
-				$mobile->set('user', $this);
-				$this->setMobileNumber($mobileNumber);
-				return $mobile;
+				$current = $this->mobileNumber;
+				if ($current and trim($current) !== trim($normalized)) {
+					// See addEmail: replacing the primary needs a fresh proof
+					// of control, not an immediate switch (ro#548, audit R02).
+					$reverify = true;
+				} else {
+					$mobile->set('user', $this);
+					$this->setMobileNumber($mobileNumber);
+					return $mobile;
+				}
+			} else {
+				// Otherwise, say it's verified for another user,
+				// even if it unsubscribed or was suspended.
+				throw new Users_Exception_AlreadyVerified(array(
+					'key' => 'mobile number',
+					'userId' => $mobile->userId
+				), 'mobileNumber');
 			}
-			// Otherwise, say it's verified for another user,
-			// even if it unsubscribed or was suspended.
-			throw new Users_Exception_AlreadyVerified(array(
-				'key' => 'mobile number',
-				'userId' => $mobile->userId
-			), 'mobileNumber');
 		}
 		
 		$user = $this;
@@ -816,7 +839,9 @@ class Users_User extends Base_Users_User
 		// In either event, update the record in the database,
 		// and re-send the mobile.
 		$minutes = Q_Config::get('Users', 'activation', 'expires', 60*24*7);
-		$mobile->state = 'unverified';
+		if (!$reverify) {
+			$mobile->state = 'unverified';
+		}
 		$mobile->userId = $this->id;
 		$mobile->activationCode = random_int(1000000, 9999999);
 		$mobile->activationCodeExpires = new Db_Expression(
