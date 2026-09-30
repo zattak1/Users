@@ -670,11 +670,22 @@ abstract class Users extends Base_Users
 			$user->set('processPlatformUserData', true);
 		}
 
-		if (!empty($imported['email']) and empty($user->emailAddress)) {
+		if (!empty($imported['email']) and empty($user->emailAddress)
+		and !Users::identifierOwnedElsewhere('email', $imported['email'], $user->id)) {
 			$emailAddress = $imported['email'];
+			// Before the set: the account's identifiers until now.
+			$hadMobile = $user->mobileNumber;
 			// We automatically set their email as verified, without a confirmation message,
 			// because we trust the authentication platform.
 			$user->setEmailAddress($emailAddress, true, $email);
+			// Trusting the platform for proof does not make it a first
+			// registration: an account that could already sign in by mobile
+			// just gained a way in, so it owes the same safeguards (ro#942).
+			if ($hadMobile) {
+				Users::identifierCredentialEvent(
+					$user, 'email address', null, $userWasLoggedIn, $hadMobile, 'added'
+				);
+			}
 			// But might send a welcome email to the users who just authenticated
 			$emailSubject = Q_Config::get('Users', 'transactional', 'authenticated', 'subject', false);
 			$emailView = Q_Config::get('Users', 'transactional', 'authenticated', 'body', false);
@@ -998,6 +1009,40 @@ abstract class Users extends Base_Users
 			return false;
 		}
 		return hash_equals($stored, $given);
+	}
+
+	/**
+	 * Whether an email address or mobile number already belongs to a user
+	 * other than $userId in a verified state. setEmailAddress()/setMobileNumber()
+	 * with $verified = true skip that check and reassign the row, so a caller
+	 * that trusts an outside source (a login platform, an import) must ask
+	 * first, or it hands one user's sign-in address to another (ro#942).
+	 *
+	 * @method identifierOwnedElsewhere
+	 * @static
+	 * @param {string} $type "email" or "mobile"
+	 * @param {string} $value
+	 * @param {string} $userId
+	 * @return {boolean}
+	 */
+	static function identifierOwnedElsewhere($type, $value, $userId)
+	{
+		if ($type === 'email') {
+			if (!Q_Valid::email($value, $normalized)) {
+				return false;
+			}
+			$row = new Users_Email();
+			$row->address = $normalized;
+		} else {
+			if (!Q_Valid::phone($value, $normalized)) {
+				return false;
+			}
+			$row = new Users_Mobile();
+			$row->number = $normalized;
+		}
+		return $row->retrieve(null, array('ignoreCache' => true))
+			and $row->userId !== $userId
+			and $row->state !== 'unverified';
 	}
 
 	/**
