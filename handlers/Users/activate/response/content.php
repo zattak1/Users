@@ -9,7 +9,7 @@ function Users_activate_response_content()
 	if ($user and !empty($user->passphraseHash)) {
 		if ($emailAddress and $user->emailAddress == $emailAddress) {
 			$complete = true;
-		} else if ($mobileNumber and $user->mobileNumber = $mobileNumber) {
+		} else if ($mobileNumber and $user->mobileNumber == $mobileNumber) { // was =, ro#957
 			$complete = true;
 		}
 	}

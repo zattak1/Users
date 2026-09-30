@@ -488,6 +488,13 @@ class Users_User extends Base_Users_User
 		$reverify = false;
 		if ($email->retrieve(null, array('ignoreCache' => true))
 		and $email->state !== 'unverified') {
+			if ($email->userId === $this->id and $email->state === 'suspended') {
+				// Activation would set it active again (#548 R09).
+				throw new Users_Exception_WrongState(array(
+					'key' => $email->address,
+					'state' => $email->state
+				), 'emailAddress');
+			}
 			if ($email->userId === $this->id) {
 				$current = $this->emailAddress;
 				if (strtolower(trim((string)$current)) !== strtolower(trim($normalized))) {
@@ -519,15 +526,11 @@ class Users_User extends Base_Users_User
 		// doesn't exist, or hasn't been verified yet.
 		// In either event, update the record in the database,
 		// and re-send the email.
-		$minutes = Q_Config::get('Users', 'activation', 'expires', 60*24*7);
 		if (!$reverify) {
 			$email->state = 'unverified';
 		}
 		$email->userId = $this->id;
-		$email->activationCode = random_int(1000000, 9999999);
-		$email->activationCodeExpires = new Db_Expression(
-			"CURRENT_TIMESTAMP + INTERVAL $minutes MINUTE"
-		);
+		Users::issueActivationCode($email); // keeps a still-valid code (#548 R09)
 		$email->authCode = sha1(microtime() . mt_rand());
 		$arr = array(
 			'code' => $email->activationCode,
@@ -867,6 +870,13 @@ class Users_User extends Base_Users_User
 		$reverify = false;
 		if ($mobile->retrieve(null, array('ignoreCache' => true))
 		and $mobile->state !== 'unverified') {
+			if ($mobile->userId === $this->id and $mobile->state === 'suspended') {
+				// Activation would set it active again (#548 R09).
+				throw new Users_Exception_WrongState(array(
+					'key' => $mobile->number,
+					'state' => $mobile->state
+				), 'mobileNumber');
+			}
 			if ($mobile->userId === $this->id) {
 				$current = $this->mobileNumber;
 				if (trim((string)$current) !== trim($normalized)) {
@@ -894,15 +904,11 @@ class Users_User extends Base_Users_User
 		// doesn't exist, or hasn't been verified yet.
 		// In either event, update the record in the database,
 		// and re-send the mobile.
-		$minutes = Q_Config::get('Users', 'activation', 'expires', 60*24*7);
 		if (!$reverify) {
 			$mobile->state = 'unverified';
 		}
 		$mobile->userId = $this->id;
-		$mobile->activationCode = random_int(1000000, 9999999);
-		$mobile->activationCodeExpires = new Db_Expression(
-			"CURRENT_TIMESTAMP + INTERVAL $minutes MINUTE"
-		);
+		Users::issueActivationCode($mobile); // keeps a still-valid code (#548 R09)
 		$number = $mobile->number;
 		if (substr($number, 0, 2) == '+1') {
 			$number = substr($number, 2);

@@ -1001,6 +1001,36 @@ abstract class Users extends Base_Users
 	}
 
 	/**
+	 * Gives an email or mobile row an activation code: keeps the one it has if
+	 * it is still valid, else issues a new one. Anyone who knows an address can
+	 * ask for a resend, and issuing a new code each time let them cancel the
+	 * one the owner was about to use, and reset the attempt limit (#548 R09,
+	 * #941). Reusing it leaves nothing for a stranger to reset.
+	 *
+	 * @method issueActivationCode
+	 * @static
+	 * @param {Users_Email|Users_Mobile} $row
+	 * @return {boolean} true if a new code was issued, false if the old one was kept
+	 */
+	static function issueActivationCode($row)
+	{
+		if (!empty($row->activationCode) and !empty($row->activationCodeExpires)) {
+			$db = $row instanceof Users_Mobile ? Users_Mobile::db() : Users_Email::db();
+			$expires = $row->activationCodeExpires;
+			if (!($expires instanceof Db_Expression)
+			and $db->getCurrentTimestamp() < $db->fromDateTime($expires)) {
+				return false;
+			}
+		}
+		$minutes = Q_Config::get('Users', 'activation', 'expires', 60*24*7);
+		$row->activationCode = random_int(1000000, 9999999);
+		$row->activationCodeExpires = new Db_Expression(
+			"CURRENT_TIMESTAMP + INTERVAL $minutes MINUTE"
+		);
+		return true;
+	}
+
+	/**
 	 * Records a wrong activation code against its row by shortening the code's
 	 * life by 1/Users/activation/maxAttempts of Users/activation/expires, so the
 	 * code expires after that many wrong tries. One atomic UPDATE on the
@@ -1030,7 +1060,7 @@ abstract class Users extends Base_Users
 	}
 
 	/**
-	 * Gives the current session a new id and ends the old one, even when the
+	 * Gives the current session a new id and deletes the old one's row, even when the
 	 * user is already logged in on it. setLoggedInUser() returns early for a
 	 * user who is already logged in, so it never rotates the id; a change to
 	 * how the account is reached must not leave a cookie copied before the
@@ -1055,7 +1085,15 @@ abstract class Users extends Base_Users
 		if (Q::startsWith($session->id, $internalSessionIdPrefix)) {
 			return null;
 		}
+		$oldId = $session->id;
 		$sessionId = Q_Session::regenerateId(true, $duration, 'authenticated');
+		// regenerateId(true) does not remove the old row: it calls
+		// session_abort() first, so destroy()'s session_destroy() is skipped.
+		// The row keeps its userId, so a copied cookie would still sign in
+		// unless something else deletes it (#548, Opus audit R04).
+		if ($oldId and $oldId !== $sessionId) {
+			Users_Session::delete()->where(array('id' => $oldId))->execute();
+		}
 		Q_Session::setNonce();
 		$user->sessionId = $sessionId;
 		$user->save();
@@ -1115,15 +1153,25 @@ abstract class Users extends Base_Users
 		$user, $type, $previousEmail, $rotate = false,
 		$previousMobile = null, $kind = 'replaced')
 	{
-		if ($rotate) {
-			self::rotateSession($user);
-		}
+		// The change is already saved and its code consumed, so a retry cannot
+		// redo this. Whatever fails, the owner must still hear about it, and
+		// the failure must reach the log with enough to act on (#548, R05).
 		$invalidated = false;
-		if (Q_Config::get('Users', 'session', 'invalidateOthersOnIdentifierChange', true)) {
-			self::logoutOtherSessions($user, Q_Session::id());
-			$invalidated = true;
+		try {
+			if ($rotate) {
+				self::rotateSession($user);
+			}
+			if (Q_Config::get('Users', 'session', 'invalidateOthersOnIdentifierChange', true)) {
+				self::logoutOtherSessions($user, Q_Session::id());
+				$invalidated = true;
+			}
+		} catch (Exception $e) {
+			Q::log("Users: identifier $kind for user {$user->id} was saved but its "
+				. "sessions were not ended: " . $e->getMessage(), 'Users');
+			throw $e;
+		} finally {
+			self::notifyIdentifierChanged($user, $type, $previousEmail, $previousMobile, $kind, $invalidated);
 		}
-		self::notifyIdentifierChanged($user, $type, $previousEmail, $previousMobile, $kind, $invalidated);
 	}
 
 	/**

@@ -231,11 +231,7 @@ class Users_Mobile extends Base_Users_Mobile
 				), 'mobileNumber');
 			}
 		}
-		$minutes = Q_Config::get('Users', 'activation', 'expires', 60*24*7);
-		$this->activationCode = random_int(1000000, 9999999);;
-		$this->activationCodeExpires = new Db_Expression(
-			"CURRENT_TIMESTAMP + INTERVAL $minutes MINUTE"
-		);
+		Users::issueActivationCode($this); // keeps a still-valid code (#548 R09)
 		$this->authCode = sha1(microtime() . mt_rand());
 		$number = $this->number;
 		if (substr($number, 0, 2) == '+1') {

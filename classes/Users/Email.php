@@ -259,11 +259,7 @@ class Users_Email extends Base_Users_Email
 				), 'emailAddress');
 			}
 		}
-		$minutes = Q_Config::get('Users', 'activation', 'expires', 60*24*7);
-		$this->activationCode = random_int(1000000, 9999999);
-		$this->activationCodeExpires = new Db_Expression(
-			"CURRENT_TIMESTAMP + INTERVAL $minutes MINUTE"
-		);
+		Users::issueActivationCode($this); // keeps a still-valid code (#548 R09)
 		$this->authCode = sha1(microtime() . mt_rand());
 		$link = Q_Uri::url('Users/activate?p=1&code='.urlencode($this->activationCode)
 			. ' emailAddress='.urlencode($this->address));
