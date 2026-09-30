@@ -268,7 +268,8 @@
 			"expires": 86400
 		},
 		"activation": {
-			"expires": 10080
+			"expires": 10080,
+			"maxAttempts": 10
 		},
 		"notices": {
 			"timeout": 5,

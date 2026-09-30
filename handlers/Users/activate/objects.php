@@ -48,12 +48,15 @@ function Users_activate_objects_email($emailAddress, &$email)
 			throw new Q_Exception("Missing user corresponding to this email address.", "emailAddress");
 		}
 	}
-	if (!empty($_REQUEST['code']) and !Users::activationCodeMatches($email->activationCode, $_REQUEST['code'])) {
-		throw new Q_Exception("The activation code does not match. Did you get a newer email?", 'code');
-	}
+	// Expiry first: checked after the code, an expired row answered "expired"
+	// only to the right code, telling a guesser when it had found it (ro#941).
 	$timestamp = Users_Email::db()->getCurrentTimestamp();
 	if ($timestamp > Users_Email::db()->fromDateTime($email->activationCodeExpires)) {
 		throw new Q_Exception("Activation code expired");
+	}
+	if (!empty($_REQUEST['code']) and !Users::activationCodeMatches($email->activationCode, $_REQUEST['code'])) {
+		Users::activationCodeFailed($email);
+		throw new Q_Exception("The activation code does not match. Did you get a newer email?", 'code');
 	}
 	if (Q_Request::method() !== 'POST'
 	and empty($_REQUEST['p'])
@@ -94,12 +97,15 @@ function Users_activate_objects_mobile($mobileNumber, &$mobile)
 			));
 		}
 	}
-	if (!empty($_REQUEST['code']) and !Users::activationCodeMatches($mobile->activationCode, $_REQUEST['code'])) {
-		throw new Q_Exception("The activation code does not match. Did you get a newer message?", 'code');
-	}
+	// Expiry first: checked after the code, an expired row answered "expired"
+	// only to the right code, telling a guesser when it had found it (ro#941).
 	$timestamp = Users_Mobile::db()->getCurrentTimestamp();
 	if ($timestamp > Users_Mobile::db()->fromDateTime($mobile->activationCodeExpires)) {
 		throw new Q_Exception("Activation code expired");
+	}
+	if (!empty($_REQUEST['code']) and !Users::activationCodeMatches($mobile->activationCode, $_REQUEST['code'])) {
+		Users::activationCodeFailed($mobile);
+		throw new Q_Exception("The activation code does not match. Did you get a newer message?", 'code');
 	}
 	if (Q_Request::method() !== 'POST'
 	and empty($_REQUEST['p'])

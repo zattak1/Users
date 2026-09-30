@@ -1001,6 +1001,35 @@ abstract class Users extends Base_Users
 	}
 
 	/**
+	 * Records a wrong activation code against its row by shortening the code's
+	 * life by 1/Users/activation/maxAttempts of Users/activation/expires, so the
+	 * code expires after that many wrong tries. One atomic UPDATE on the
+	 * existing column: concurrent guesses cannot lose a decrement, and no
+	 * schema change is needed. A 7-digit code had no limit at all before
+	 * (ro#941); now a guesser gets maxAttempts tries per code issued.
+	 *
+	 * @method activationCodeFailed
+	 * @static
+	 * @param {Users_Email|Users_Mobile} $row
+	 */
+	static function activationCodeFailed($row)
+	{
+		$minutes = (int) Q_Config::get('Users', 'activation', 'expires', 60*24*7);
+		$max = max(1, (int) Q_Config::get('Users', 'activation', 'maxAttempts', 10));
+		// Round up, plus a second: maxAttempts wrong tries must overshoot the
+		// whole lifetime, since "expired" is a strict > on second resolution.
+		$step = (int) ceil($minutes * 60 / $max) + 1;
+		$expr = new Db_Expression("activationCodeExpires - INTERVAL $step SECOND");
+		if ($row instanceof Users_Email) {
+			Users_Email::update()->set(array('activationCodeExpires' => $expr))
+				->where(array('address' => $row->address))->execute();
+		} else if ($row instanceof Users_Mobile) {
+			Users_Mobile::update()->set(array('activationCodeExpires' => $expr))
+				->where(array('number' => $row->number))->execute();
+		}
+	}
+
+	/**
 	 * Gives the current session a new id and ends the old one, even when the
 	 * user is already logged in on it. setLoggedInUser() returns early for a
 	 * user who is already logged in, so it never rotates the id; a change to
