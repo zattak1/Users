@@ -17,6 +17,7 @@ function Users_identifier_delete()
 	// removed the primary field is empty, and a later add would look like a
 	// first registration and skip every safeguard.
 	$previousEmail = $user->emailAddress;
+	$previousMobile = $user->mobileNumber;
 	$wasPrimary = false;
 	if ($type === 'email') {
 		Q_Valid::email($identifier, $normalized);
@@ -34,7 +35,9 @@ function Users_identifier_delete()
 			$user,
 			$type === 'email' ? 'email address' : 'mobile number',
 			$previousEmail,
-			true
+			true,
+			$previousMobile,
+			'removed'
 		);
 	}
 }

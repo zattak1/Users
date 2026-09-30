@@ -70,28 +70,32 @@ function Users_activate_post()
 		$previousMobile = $user->mobileNumber;
 		if ($type == 'email address') {
 			$user->setEmailAddress($email->address, true); // may throw exception
-			$replaced = $previousEmail
-				&& strtolower(trim($previousEmail)) !== strtolower(trim($email->address));
+			$activatedValue = $email->address;
 		} else if ($type == 'mobile number') {
 			$user->setMobileNumber($mobile->number, true); // may throw exception
-			$replaced = $previousMobile && trim($previousMobile) !== trim($mobile->number);
+			$activatedValue = $mobile->number;
 		}
+		// null for the account's first identifier, else "added" or "replaced"
+		// (ro#548, Opus audit R02: registration is per account, not per field).
+		$kind = Users::identifierChangeKind($type, $activatedValue, $previousEmail, $previousMobile);
 		// Log the user in, since they have just added an email to their account
 		$activated = Q::interpolate($text['notifications']['IdentifierActivated'], @compact('type'));
 		if (Users::setLoggedInUser($user) !== false) {
 			$sessionFresh = true;
 		}
 
-		// Replacing a login identifier is a credential event: the identifier is
+		// Changing a login identifier is a credential event: the identifier is
 		// what Users/login matches on and what recovery is sent to, so whoever
 		// controls it controls the account. An attacker holding only a session
-		// could otherwise swap it and keep their foothold. Only a *replacement*
-		// counts - the first identifier (registration) has nothing to protect.
-		// The current session was regenerated above and is kept. See ro#548.
-		if (!empty($replaced)) {
+		// could otherwise swap or add one and keep their foothold. Only the
+		// account's very first identifier (registration) has nothing to
+		// protect. See ro#548.
+		if ($kind) {
 			// Rotate too when this request did not: an already-logged-in
 			// browser keeps its id through setLoggedInUser (audit R04).
-			Users::identifierCredentialEvent($user, $type, $previousEmail, !$sessionFresh);
+			Users::identifierCredentialEvent(
+				$user, $type, $previousEmail, !$sessionFresh, $previousMobile, $kind
+			);
 		}
 		Q_Response::removeNotice('Users/activate/objects');
 		Q_Response::setNotice("Users/activate/activated", $activated, array(

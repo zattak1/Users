@@ -1034,60 +1034,117 @@ abstract class Users extends Base_Users
 	}
 
 	/**
-	 * What replacing (or removing) a login identifier owes the account: end
-	 * the user's other sessions, and tell the address they had before. One
-	 * place, so the activate, resend and delete paths cannot drift (ro#548).
-	 * Never throws for a mail failure: the change has already happened.
+	 * Classifies an activation of a login identifier. Registration is per
+	 * account, not per field: once the account has any email or mobile, a new
+	 * one of either type is a new way in, so adding a mobile to an email-only
+	 * account is a credential event just as replacing the email is (ro#548).
+	 *
+	 * @method identifierChangeKind
+	 * @static
+	 * @param {string} $type "email address" or "mobile number" (what was activated)
+	 * @param {string} $value The activated address or number
+	 * @param {string|null} $previousEmail The account's email before activation
+	 * @param {string|null} $previousMobile The account's mobile before activation
+	 * @return {string|null} null when nothing changed or this is the account's
+	 *   first identifier; "added" when the type was empty; else "replaced"
+	 */
+	static function identifierChangeKind($type, $value, $previousEmail, $previousMobile)
+	{
+		if (empty($previousEmail) and empty($previousMobile)) {
+			return null; // registration: nothing to protect yet
+		}
+		if ($type === 'email address') {
+			$previous = $previousEmail;
+			$same = strtolower(trim((string)$previous)) === strtolower(trim((string)$value));
+		} else {
+			$previous = $previousMobile;
+			$same = trim((string)$previous) === trim((string)$value);
+		}
+		if ($same) {
+			return null;
+		}
+		return empty($previous) ? 'added' : 'replaced';
+	}
+
+	/**
+	 * What changing the set of login identifiers owes the account: end the
+	 * user's other sessions, and tell the owner where they could be reached
+	 * before. One place, so the activate and delete paths cannot drift
+	 * (ro#548). Never throws for a message failure: the change has happened.
 	 *
 	 * @method identifierCredentialEvent
 	 * @static
 	 * @param {Users_User} $user
-	 * @param {string} $type "email address" or "mobile number"
-	 * @param {string|null} $previousEmail Where to send the warning; none if empty
+	 * @param {string} $type "email address" or "mobile number" (what changed)
+	 * @param {string|null} $previousEmail The email the account had before, if any
 	 * @param {boolean} [$rotate=false] Also rotate the current session id
+	 * @param {string|null} [$previousMobile=null] The mobile it had before; texted
+	 *   when there was no email to write to
+	 * @param {string} [$kind="replaced"] "replaced", "added" or "removed"
 	 */
-	static function identifierCredentialEvent($user, $type, $previousEmail, $rotate = false)
+	static function identifierCredentialEvent(
+		$user, $type, $previousEmail, $rotate = false,
+		$previousMobile = null, $kind = 'replaced')
 	{
 		if ($rotate) {
 			self::rotateSession($user);
 		}
+		$invalidated = false;
 		if (Q_Config::get('Users', 'session', 'invalidateOthersOnIdentifierChange', true)) {
 			self::logoutOtherSessions($user, Q_Session::id());
+			$invalidated = true;
 		}
-		self::notifyIdentifierChanged($user, $type, $previousEmail);
+		self::notifyIdentifierChanged($user, $type, $previousEmail, $previousMobile, $kind, $invalidated);
 	}
 
 	/**
-	 * Mail the address an account was reachable at before an identifier change.
-	 * Best effort: a mail failure is logged, never thrown. See ro#548.
+	 * Tell the owner, at an address they had before the change, that a login
+	 * identifier was replaced, added or removed. Email if there was one, else
+	 * a text to the previous mobile. Best effort: failures are logged, never
+	 * thrown. See ro#548.
 	 *
 	 * @method notifyIdentifierChanged
 	 * @static
 	 * @param {Users_User} $user
 	 * @param {string} $type "email address" or "mobile number"
-	 * @param {string|null} $previousEmail nothing is sent if empty
+	 * @param {string|null} $previousEmail
+	 * @param {string|null} [$previousMobile=null]
+	 * @param {string} [$kind="replaced"] "replaced", "added" or "removed"
+	 * @param {boolean} [$invalidated=true] whether other sessions were ended
 	 */
-	static function notifyIdentifierChanged($user, $type, $previousEmail)
+	static function notifyIdentifierChanged(
+		$user, $type, $previousEmail, $previousMobile = null,
+		$kind = 'replaced', $invalidated = true)
 	{
-		if (empty($previousEmail)) {
-			return;
-		}
+		$fields = array(
+			'user' => $user,
+			'type' => $type,
+			'kind' => $kind,
+			'invalidated' => $invalidated,
+			'communityName' => self::communityName()
+		);
 		try {
-			$to = new Users_Email();
-			$to->address = $previousEmail;
-			$to->sendMessage(
-				Q_Config::get('Users', 'transactional', 'identifierChanged', 'subject',
-					"Your sign-in $type was changed"),
-				Q_Config::get('Users', 'transactional', 'identifierChanged', 'body',
-					'Users/email/identifierChanged.php'),
-				array(
-					'user' => $user,
-					'type' => $type,
-					'communityName' => self::communityName()
-				)
-			);
+			if (!empty($previousEmail)) {
+				$to = new Users_Email();
+				$to->address = $previousEmail;
+				$to->sendMessage(
+					Q_Config::get('Users', 'transactional', 'identifierChanged', 'subject',
+						"Your sign-in $type was $kind"),
+					Q_Config::get('Users', 'transactional', 'identifierChanged', 'body',
+						'Users/email/identifierChanged.php'),
+					$fields
+				);
+			} else if (!empty($previousMobile)) {
+				$to = new Users_Mobile();
+				$to->number = $previousMobile;
+				$to->sendMessage(
+					Q_Config::get('Users', 'transactional', 'identifierChanged', 'mobile',
+						'Users/mobile/identifierChanged.php'),
+					$fields
+				);
+			}
 		} catch (Exception $e) {
-			Q::log("Users: could not notify $previousEmail of a $type change: "
+			Q::log("Users: could not notify the owner of a $type change ($kind): "
 				. $e->getMessage(), 'Users');
 		}
 	}
