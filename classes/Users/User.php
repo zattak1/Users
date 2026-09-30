@@ -496,7 +496,7 @@ class Users_User extends Base_Users_User
 				), 'emailAddress');
 			}
 			if ($email->userId === $this->id) {
-				$current = $this->emailAddress;
+				$current = isset($this->emailAddress) ? $this->emailAddress : null;
 				if (strtolower(trim((string)$current)) !== strtolower(trim($normalized))) {
 					// Choosing a retained address as the primary - replacing one,
 					// or filling the field after a removal - changes what the
@@ -649,7 +649,9 @@ class Users_User extends Base_Users_User
 		}
 
 		// Everything is okay. Assign it!
-		$previous = $this->emailAddress;
+		// isset(): a user saved but never loaded has no emailAddress field, and
+		// reading it throws (Users::register with activation off, ro#939 regression).
+		$previous = isset($this->emailAddress) ? $this->emailAddress : null;
 		$email->userId = $this->id;
 		$email->state = 'active';
 		$email->activationCode = ''; // can't use the code again
@@ -716,7 +718,7 @@ class Users_User extends Base_Users_User
 		$this->unlinkIdentify('email', $normalized);
 
 		// Case-insensitive: the field can hold the address as typed (ro#548 audit R07).
-		if (strtolower(trim((string)$this->emailAddress)) === strtolower($normalized)) {
+		if (isset($this->emailAddress) and strtolower(trim((string)$this->emailAddress)) === strtolower($normalized)) {
 			$this->emailAddress = '';
 			$this->save();
 		}
@@ -755,7 +757,7 @@ class Users_User extends Base_Users_User
 		$users_mobile->remove();
 		$this->unlinkIdentify('mobile', $normalized);
 
-		if ($this->mobileNumber == $normalized) {
+		if (isset($this->mobileNumber) and $this->mobileNumber == $normalized) {
 			$this->mobileNumber = '';
 			$this->save();
 		}
@@ -878,7 +880,7 @@ class Users_User extends Base_Users_User
 				), 'mobileNumber');
 			}
 			if ($mobile->userId === $this->id) {
-				$current = $this->mobileNumber;
+				$current = isset($this->mobileNumber) ? $this->mobileNumber : null;
 				if (trim((string)$current) !== trim($normalized)) {
 					// See addEmail: replacing the primary needs a fresh proof
 					// of control, not an immediate switch (ro#548, audit R02).
@@ -1027,7 +1029,7 @@ class Users_User extends Base_Users_User
 		}
 
 		// Everything is okay. Assign it!
-		$previous = $this->mobileNumber;
+		$previous = isset($this->mobileNumber) ? $this->mobileNumber : null; // see setEmailAddress
 		$mobile->userId = $this->id;
 		$mobile->state = 'active';
 		$mobile->activationCode = ''; // can't use the code again

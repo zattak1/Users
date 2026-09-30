@@ -66,8 +66,8 @@ function Users_activate_post()
 	if ($type) {
 		// What the account was reachable by before this call. Read it first:
 		// setEmailAddress() / setMobileNumber() overwrite the user's field.
-		$previousEmail = $user->emailAddress;
-		$previousMobile = $user->mobileNumber;
+		$previousEmail = isset($user->emailAddress) ? $user->emailAddress : null;
+		$previousMobile = isset($user->mobileNumber) ? $user->mobileNumber : null;
 		if ($type == 'email address') {
 			$user->setEmailAddress($email->address, true); // may throw exception
 			$activatedValue = $email->address;

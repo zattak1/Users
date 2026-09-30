@@ -674,7 +674,7 @@ abstract class Users extends Base_Users
 		and !Users::identifierOwnedElsewhere('email', $imported['email'], $user->id)) {
 			$emailAddress = $imported['email'];
 			// Before the set: the account's identifiers until now.
-			$hadMobile = $user->mobileNumber;
+			$hadMobile = isset($user->mobileNumber) ? $user->mobileNumber : null; // a new user has no field yet
 			// We automatically set their email as verified, without a confirmation message,
 			// because we trust the authentication platform.
 			$user->setEmailAddress($emailAddress, true, $email);
