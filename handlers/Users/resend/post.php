@@ -32,8 +32,20 @@ function Users_resend_post()
 	if (!$user->retrieve()) {
 		throw new Q_Exception("No user corresponds to that $thing", array('identifier', $field));
 	}
-	if ($logged_in_user = Users::loggedInUser() and $logged_in_user->id != $user->id) {
+	$logged_in_user = Users::loggedInUser();
+	if ($logged_in_user and $logged_in_user->id != $user->id) {
 		throw new Q_Exception("That $thing belongs to someone else", array('identifier', $field));
+	}
+	// A verified address that is not the account's current one (kept from
+	// before ro#939 retired replaced identifiers) must not become a way in for
+	// a logged-out caller: activating its code would log them in. Same answer
+	// as an unknown address, so this does not reveal which addresses exist.
+	if (!$logged_in_user and !empty($row->userId) and $row->state !== 'unverified') {
+		$current = ($type === 'email') ? $user->emailAddress : $user->mobileNumber;
+		$here = ($type === 'email') ? $row->address : $row->number;
+		if (strtolower(trim((string)$current)) !== strtolower(trim((string)$here))) {
+			throw new Q_Exception("That $thing was not found in the system", array('identifier', $field));
+		}
 	}
 	if ($type === 'email') {
 		$existing = $user->addEmail($identifier);

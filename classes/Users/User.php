@@ -646,6 +646,7 @@ class Users_User extends Base_Users_User
 		}
 
 		// Everything is okay. Assign it!
+		$previous = $this->emailAddress;
 		$email->userId = $this->id;
 		$email->state = 'active';
 		$email->activationCode = ''; // can't use the code again
@@ -660,6 +661,14 @@ class Users_User extends Base_Users_User
 		$this->emailAddressPending = '';
 		$this->emailAddress = $emailAddress;
 		$this->save();
+
+		// A replaced address must stop being a way into the account: it no
+		// longer signs in, and nobody can recover the account through it
+		// (ro#939). Only a *different* previous address is retired.
+		if ($previous and Q_Valid::email($previous, $previousNormalized)
+		and strtolower($previousNormalized) !== strtolower($normalized)) {
+			$this->retireIdentifier('email', $previousNormalized);
+		}
 		$user = $this;
 		
 		Q_Response::removeNotice('Users/email');
@@ -701,8 +710,10 @@ class Users_User extends Base_Users_User
 		}
 
 		$users_email->remove();
+		$this->unlinkIdentify('email', $normalized);
 
-		if ($this->emailAddress == $normalized) {
+		// Case-insensitive: the field can hold the address as typed (ro#548 audit R07).
+		if (strtolower(trim((string)$this->emailAddress)) === strtolower($normalized)) {
 			$this->emailAddress = '';
 			$this->save();
 		}
@@ -739,6 +750,7 @@ class Users_User extends Base_Users_User
 		}
 
 		$users_mobile->remove();
+		$this->unlinkIdentify('mobile', $normalized);
 
 		if ($this->mobileNumber == $normalized) {
 			$this->mobileNumber = '';
@@ -749,6 +761,49 @@ class Users_User extends Base_Users_User
 
 		return true;
 	}
+	/**
+	 * Stops a replaced email address or mobile number from reaching this
+	 * account: deletes its row if it is still ours and marks its login index
+	 * entry unlinked, so Users/login, Users/resend and Users/activate no longer
+	 * resolve it to this user (ro#939).
+	 * @method retireIdentifier
+	 * @param {string} $type "email" or "mobile"
+	 * @param {string} $normalized normalized address or number
+	 */
+	function retireIdentifier($type, $normalized)
+	{
+		$row = ($type === 'email') ? new Users_Email() : new Users_Mobile();
+		if ($type === 'email') {
+			$row->address = $normalized;
+		} else {
+			$row->number = $normalized;
+		}
+		if ($row->retrieve(null, array('ignoreCache' => true))
+		and $row->userId === $this->id) {
+			$row->remove();
+		}
+		$this->unlinkIdentify($type, $normalized);
+	}
+
+	/**
+	 * Marks this user's Users_Identify entry for an email or mobile unlinked.
+	 * Users::identify() only matches "verified" and "future" rows.
+	 * @method unlinkIdentify
+	 * @param {string} $type "email" or "mobile"
+	 * @param {string} $normalized
+	 */
+	function unlinkIdentify($type, $normalized)
+	{
+		Users_Identify::update()
+			->set(array(
+				'state' => 'unlinked',
+				'updatedTime' => new Db_Expression('CURRENT_TIMESTAMP')
+			))->where(array(
+				'identifier' => $type . '_hashed:' . Q_Utils::hash($normalized),
+				'userId' => $this->id
+			))->execute();
+	}
+
 	/**
 	 * @method removeIdentifier
 	 * @param {string} $identifier
@@ -966,6 +1021,7 @@ class Users_User extends Base_Users_User
 		}
 
 		// Everything is okay. Assign it!
+		$previous = $this->mobileNumber;
 		$mobile->userId = $this->id;
 		$mobile->state = 'active';
 		$mobile->activationCode = ''; // can't use the code again
@@ -980,6 +1036,12 @@ class Users_User extends Base_Users_User
 		$this->mobileNumberPending = '';
 		$this->mobileNumber = $normalized;
 		$this->save();
+
+		// See setEmailAddress: a replaced number is retired (ro#939).
+		if ($previous and Q_Valid::phone($previous, $previousNormalized)
+		and $previousNormalized !== $normalized) {
+			$this->retireIdentifier('mobile', $previousNormalized);
+		}
 		$user = $this;
 		/**
 		 * @event Users/setMobileNumber {after}
