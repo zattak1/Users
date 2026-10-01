@@ -12,6 +12,9 @@
  *   community. With no roles configured nobody may do it for another user.
  * - when Users/discourse/requireAuthorizedRole is configured, it gates the
  *   endpoint for everyone, as before.
+ * - baseUrl must name a forum configured in Users/apps/discourse (matched by
+ *   scheme, host and port), so the server never contacts a host the caller
+ *   chose. Nothing is configured by default, so by default this refuses.
  *
  * Code in the same process that has already decided who may act (a CLI
  * import, say) passes "skipAccess" => true in $params. $params is empty for
@@ -42,6 +45,10 @@ function Users_discourse_post($params)
             throw new Users_Exception_NotAuthorized();
         }
     }
+    // Only a forum configured in Users/apps/discourse/<appId>/baseUrl is ever
+    // contacted, at its configured address; with none configured this always
+    // refuses. Checked before anything is fetched or saved.
+    $baseUrl = Users_ExternalTo_Discourse::requireConfiguredBaseUrl($baseUrl);
     if (isset($r['apiKey']))  {
         $apiKey = $r['apiKey'];
     }
