@@ -24,7 +24,9 @@
  * @param {array} $params
  * @param {string} $params.userId
  * @param {string} $params.baseUrl
- * @param {string} [$params.apiKey]
+ * The API key sent to the forum is its configured
+ * Users/apps/discourse/<appId>/keys/system; an apiKey in the request or
+ * $params is ignored.
  * @param {boolean} [$params.skipAccess=false]
  */
 function Users_discourse_post($params)
@@ -49,15 +51,12 @@ function Users_discourse_post($params)
     // contacted, at its configured address; with none configured this always
     // refuses. Checked before anything is fetched or saved.
     $baseUrl = Users_ExternalTo_Discourse::requireConfiguredBaseUrl($baseUrl);
-    if (isset($r['apiKey']))  {
-        $apiKey = $r['apiKey'];
-    }
     $uxt = new Users_ExternalTo_Discourse(array(
         'userId' => $userId,
         'platform' => 'discourse',
         'appId' => $baseUrl
     ));
-    $uxt->setExtra(@compact('baseUrl', 'apiKey'));
+    $uxt->setExtra(compact('baseUrl'));
     $ret = $uxt->create();
 
     // Q_Request::requireFields(array(
