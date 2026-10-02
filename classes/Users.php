@@ -35,6 +35,83 @@ abstract class Users extends Base_Users
 	}
 
 	/**
+	 * Per-request memo for Users::isClosed(), keyed by user id.
+	 * Nothing invalidates it within a request; code that closes an
+	 * account must not rely on it to see its own write.
+	 * @property $isClosedCache
+	 * @type array
+	 * @static
+	 */
+	public static $isClosedCache = array();
+
+	/**
+	 * Whether the "no handler answered Users/isClosed" warning was logged
+	 * in this request.
+	 * @property $isClosedWarned
+	 * @type boolean
+	 * @static
+	 */
+	public static $isClosedWarned = false;
+
+	/**
+	 * Whether the account with this id has been closed, so that it must not
+	 * be logged in by any path. The app answers through the
+	 * "Users/isClosed" before-event: a handler sets the by-reference
+	 * $result to true (closed) or false (not closed). A handler's return
+	 * value is not the answer.
+	 *
+	 * If no handler sets $result, the answer depends on the
+	 * Users/isClosed/required config: when true, the account is treated as
+	 * closed (so an app with account closure that loses its handler fails
+	 * closed); otherwise it is treated as not closed (the app keeps no
+	 * closed-account store) and a warning is logged once per request.
+	 *
+	 * Community ids are never closed and dispatch nothing. A throwing
+	 * handler propagates its exception, which refuses a login.
+	 * The answer is memoised per request, keyed by id.
+	 * @method isClosed
+	 * @static
+	 * @param {string} $userId
+	 * @return {boolean}
+	 */
+	static function isClosed($userId)
+	{
+		if (!is_string($userId) or $userId === '') {
+			return false;
+		}
+		if (array_key_exists($userId, self::$isClosedCache)) {
+			return self::$isClosedCache[$userId];
+		}
+		if (Users::isCommunityId($userId)) {
+			return self::$isClosedCache[$userId] = false;
+		}
+		$result = null;
+		$handlersCalled = array();
+		/**
+		 * @event Users/isClosed {before}
+		 * @param {string} userId
+		 * @param {&boolean} result set to true if the account is closed, false if not
+		 */
+		Q::event('Users/isClosed', @compact('userId'), 'before', false, $result, $handlersCalled);
+		if ($result === null) {
+			if (Q_Config::get('Users', 'isClosed', 'required', false)) {
+				$result = true;
+			} else {
+				if (!self::$isClosedWarned) {
+					self::$isClosedWarned = true;
+					Q::log(
+						'WARN: no Users/isClosed handler answered; treating accounts as not closed'
+						. ' (set Users/isClosed/required in apps that close accounts)',
+						'Users'
+					);
+				}
+				$result = false;
+			}
+		}
+		return self::$isClosedCache[$userId] = (bool)$result;
+	}
+
+	/**
 	 * Split an array of userIds into community and person userIds
 	 * @method splitIntoCommunityAndPersonIds
 	 * @static
@@ -1443,6 +1520,17 @@ abstract class Users extends Base_Users
 			return null;
 		}
 		$id = $_SESSION['Users']['loggedInUser']['id'];
+		if (Users::isClosed($id)) {
+			// A closed account is indistinguishable from a logged-out visitor:
+			// drop the id from this session (it is written back at shutdown)
+			// and answer as if nobody were logged in. Never a closed-account
+			// exception, so no caller can tell the two apart.
+			unset($_SESSION['Users']['loggedInUser']['id']);
+			if ($throwIfNotLoggedIn) {
+				throw new Users_Exception_NotLoggedIn();
+			}
+			return null;
+		}
 		$user = Users_User::fetch($id);
 		if (!$user && $throwIfNotLoggedIn) {
 			throw new Users_Exception_NotLoggedIn();
@@ -1475,6 +1563,12 @@ abstract class Users extends Base_Users
 	{
 		if ($user && is_string($user)) {
 			$user = Users_User::fetch($user, true);
+		}
+		if ($user && Users::isClosed($user->id)) {
+			// Every by-id login converges here (invites, intents, the
+			// switchToLoggedInUserId handoff, scripts): a closed account
+			// must not get a session, whatever the path.
+			throw new Users_Exception_NotAuthorized();
 		}
 		$loggedInUserId = Q::ifset($_SESSION, 'Users', 'loggedInUser', 'id', null);
 		if (Q::ifset($user, "id", null) === $loggedInUserId) {

@@ -217,6 +217,9 @@
 				"icon": false
 			}
 		},
+		"isClosed": {
+			"required": false
+		},
 		"login": {
 			"identifierType": "email,mobile",
 			"using": "native,web3,facebook,telegram",
