@@ -112,6 +112,22 @@ abstract class Users extends Base_Users
 	}
 
 	/**
+	 * Log one line per refused closed-account login, so refusals are
+	 * observable even where a caller swallows the exception (for example
+	 * the switchToLoggedInUserId handoff inside Q_Session::start()).
+	 * Ids and the guard site only, no personal data.
+	 * @method logClosedRefusal
+	 * @static
+	 * @protected
+	 * @param {string} $userId
+	 * @param {string} $site
+	 */
+	protected static function logClosedRefusal($userId, $site)
+	{
+		Q::log("Users closed-account guard refused userId=$userId at $site", 'Users');
+	}
+
+	/**
 	 * Split an array of userIds into community and person userIds
 	 * @method splitIntoCommunityAndPersonIds
 	 * @static
@@ -1522,10 +1538,15 @@ abstract class Users extends Base_Users
 		$id = $_SESSION['Users']['loggedInUser']['id'];
 		if (Users::isClosed($id)) {
 			// A closed account is indistinguishable from a logged-out visitor:
-			// drop the id from this session (it is written back at shutdown)
-			// and answer as if nobody were logged in. Never a closed-account
+			// answer as if nobody were logged in. Never a closed-account
 			// exception, so no caller can tell the two apart.
+			// The unset is IN MEMORY ONLY: Q_Session::writeHandler() merges
+			// $_SESSION over the stored content, so a removed key survives
+			// and the session row keeps this id (content and userId). The
+			// guard re-answers "logged out" on every request; ending the
+			// session row is the account-closing code's job, not this one's.
 			unset($_SESSION['Users']['loggedInUser']['id']);
+			self::logClosedRefusal($id, 'loggedInUser');
 			if ($throwIfNotLoggedIn) {
 				throw new Users_Exception_NotLoggedIn();
 			}
@@ -1568,6 +1589,7 @@ abstract class Users extends Base_Users
 			// Every by-id login converges here (invites, intents, the
 			// switchToLoggedInUserId handoff, scripts): a closed account
 			// must not get a session, whatever the path.
+			self::logClosedRefusal($user->id, 'setLoggedInUser');
 			throw new Users_Exception_NotAuthorized();
 		}
 		$loggedInUserId = Q::ifset($_SESSION, 'Users', 'loggedInUser', 'id', null);
