@@ -84,68 +84,107 @@ class Users_Referred extends Base_Users_Referred
 		$byUserId = $fields['byUserId'];
 
 		// Prepare the Users_Referred row
-		$referred = new Users_Referred(array(
+		$key = array(
 			'userId'         => $userId,
 			'toCommunityId'  => $communityId,
 			'referredByUserId' => $byUserId
-		));
+		);
+		$referred = new Users_Referred($key);
 
-		// Update or set points. Look the row up by its primary key only, past
-		// the per-request query cache (ignoreCache) and without storing the
-		// result in it (caching(false)). Two ways this read used to miss an
-		// existing row, and the save below then INSERTed it again and failed
-		// on the duplicate key (ro#1068):
-		// - extras were applied first, so retrieve() also matched on the
-		//   `extra` column, which never equals the stored history;
-		// - an earlier referral in this request inserted the row after a
-		//   cached "missing" read (Assets_Credits::spend() paying one
-		//   publisher twice in a request).
-		if ($referred->retrieve(null, true, array('ignoreCache' => true, 'caching' => false))) {
-			$prevPoints = $referred->points;
-			$referred->points = max($referred->points, $points);
-		} else {
-			$prevPoints = 0;
-			$referred->points = $points;
+		// Make sure the row exists and hold its lock until the save below
+		// commits (ro#1070). Read-merge-save is not atomic: two concurrent
+		// requests for one user/community/referrer both found no row and
+		// both INSERTed (the loser hit 1062), or both read the row and the
+		// second save() overwrote the first one's points and history.
+		// INSERT ... ON DUPLICATE KEY UPDATE takes an EXCLUSIVE lock on the
+		// row whether it inserts it or finds it, so the second request waits
+		// here until the first commits; a plain INSERT IGNORE would take a
+		// shared lock, and two waiters upgrading it would deadlock. The
+		// no-op update leaves an existing row as it is (rowCount() 0); a new
+		// row counts 1. Nested in a caller's transaction, begin() only counts.
+		$lockQuery = Users_Referred::insert($key)
+			->onDuplicateKeyUpdate(array('userId' => new Db_Expression('userId')))
+			->begin(false);
+		$inserted = $lockQuery->execute()->rowCount() === 1;
+		$nested = $lockQuery->nestedTransactionCount > 1;
+
+		try {
+			// Read the row by its primary key only, past the per-request
+			// query cache and without storing the result in it (ro#1068:
+			// extras applied first made retrieve() match on `extra`; a cached
+			// read returned a row an earlier referral had since updated).
+			// FOR UPDATE because a locking read sees the latest committed
+			// row, where a plain read inside a caller's older transaction
+			// could still see its snapshot.
+			$referred->retrieve(null, true, array(
+				'ignoreCache' => true,
+				'caching' => false,
+				'lock' => 'FOR UPDATE'
+			));
+			if ($inserted) {
+				$prevPoints = 0;
+				$referred->points = $points;
+			} else {
+				$prevPoints = $referred->points;
+				$referred->points = max($referred->points, $points);
+			}
+
+			// Apply extra metadata, merged into what the row already holds
+			if (!empty($fields['extras']) && is_array($fields['extras'])) {
+				$referred->setExtra($fields['extras']);
+			}
+
+			// Determine if this qualifies the referrer now
+			$threshold = Q_Config::get('Users', 'referred', 'qualified', 'points', 10);
+			if (empty($referred->qualifiedTime)
+				&& $prevPoints < $threshold
+				&& $points >= $threshold)
+			{
+				$referred->qualifiedTime = new Db_Expression("CURRENT_TIMESTAMP");
+				$justQualified = true;
+			}
+
+			// Maintain referral history: byAction
+			$maxCount = Q_Config::get('Users', 'referred', 'history', 'max', 10);
+			$byAction = $referred->getExtra('byAction', array());
+			$existing = Q::ifset($byAction, $referredAction, array());
+			if (count($existing) > $maxCount) {
+				array_shift($existing);
+			}
+			$existing[] = array(time(), $points, $prevPoints);
+			$byAction[$referredAction] = $existing;
+			$referred->setExtra('byAction', $byAction);
+
+			// Maintain referral history: byType
+			$byType = $referred->getExtra('byType', array());
+			$existing = Q::ifset($byType, $referredType, array());
+			if (count($existing) > $maxCount) {
+				array_shift($existing);
+			}
+			$existing[] = array(time(), $points, $prevPoints);
+			$byType[$referredType] = $existing;
+			$referred->setExtra('byType', $byType);
+
+			// Save the row and commit, releasing the lock taken above. The
+			// row was retrieved, so this is an UPDATE by primary key.
+			$referred->save(false, true);
+		} catch (Exception $e) {
+			// A failed statement has already rolled back the whole stack
+			// (Db_Query_Mysql::execute()), so a second ROLLBACK would throw
+			// and hide the real error: ignore that one. Inside a caller's
+			// transaction, only give back the count begin() took: rolling
+			// back would undo the caller's work for a referral, which
+			// Assets_Credits::spend() treats as optional.
+			try {
+				if ($nested) {
+					Users_Referred::commit()->execute();
+				} else {
+					$referred->executeRollback();
+				}
+			} catch (Exception $ignored) {
+			}
+			throw $e;
 		}
-
-		// Apply extra metadata, merged into what the row already holds
-		if (!empty($fields['extras']) && is_array($fields['extras'])) {
-			$referred->setExtra($fields['extras']);
-		}
-
-		// Determine if this qualifies the referrer now
-		$threshold = Q_Config::get('Users', 'referred', 'qualified', 'points', 10);
-		if (empty($referred->qualifiedTime)
-			&& $prevPoints < $threshold
-			&& $points >= $threshold)
-		{
-			$referred->qualifiedTime = new Db_Expression("CURRENT_TIMESTAMP");
-			$justQualified = true;
-		}
-
-		// Maintain referral history: byAction
-		$maxCount = Q_Config::get('Users', 'referred', 'history', 'max', 10);
-		$byAction = $referred->getExtra('byAction', array());
-		$existing = Q::ifset($byAction, $referredAction, array());
-		if (count($existing) > $maxCount) {
-			array_shift($existing);
-		}
-		$existing[] = array(time(), $points, $prevPoints);
-		$byAction[$referredAction] = $existing;
-		$referred->setExtra('byAction', $byAction);
-
-		// Maintain referral history: byType
-		$byType = $referred->getExtra('byType', array());
-		$existing = Q::ifset($byType, $referredType, array());
-		if (count($existing) > $maxCount) {
-			array_shift($existing);
-		}
-		$existing[] = array(time(), $points, $prevPoints);
-		$byType[$referredType] = $existing;
-		$referred->setExtra('byType', $byType);
-
-		// Save the row
-		$referred->save();
 
 		/**
 		 * @event Users/referred {after}
