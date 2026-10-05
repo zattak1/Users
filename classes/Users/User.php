@@ -531,7 +531,7 @@ class Users_User extends Base_Users_User
 		}
 		$email->userId = $this->id;
 		Users::issueActivationCode($email); // keeps a still-valid code (#548 R09)
-		$email->authCode = sha1(microtime() . mt_rand());
+		$email->authCode = Q_Utils::randomHexString(40); // CSPRNG, not mt_rand (ro#732)
 		$arr = array(
 			'code' => $email->activationCode,
 			'e' => $email->address
@@ -623,7 +623,7 @@ class Users_User extends Base_Users_User
 			$email->activationCode = '';
 			$email->activationCodeExpires = null;
 		}
-		$email->authCode = sha1(microtime() . mt_rand());
+		$email->authCode = Q_Utils::randomHexString(40); // CSPRNG, not mt_rand (ro#732)
 		if (!$verified) {
 			if (!$retrieved) {
 				throw new Q_Exception_MissingRow(array(
@@ -915,7 +915,7 @@ class Users_User extends Base_Users_User
 		if (substr($number, 0, 2) == '+1') {
 			$number = substr($number, 2);
 		}
-		$mobile->authCode = sha1(microtime() . mt_rand());
+		$mobile->authCode = Q_Utils::randomHexString(40); // CSPRNG, not mt_rand (ro#732)
 		$arr = array(
 			'code' => $mobile->activationCode,
 			'm' => $number
@@ -1003,7 +1003,7 @@ class Users_User extends Base_Users_User
 			$mobile->activationCode = '';
 			$mobile->activationCodeExpires = null;
 		}
-		$mobile->authCode = sha1(microtime() . mt_rand());
+		$mobile->authCode = Q_Utils::randomHexString(40); // CSPRNG, not mt_rand (ro#732)
 		if (!$verified) {
 			if (!$retrieved) {
 				throw new Q_Exception_MissingRow(array(

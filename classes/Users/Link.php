@@ -32,7 +32,7 @@ class Users_Link extends Base_Users_Link
 	{
 		if (!$this->retrieved) {
 			if (!isset($value['secret'])) {
-				$value['secret'] = uniqid(mt_rand(), true);
+				$value['secret'] = Q_Utils::randomHexString(40); // CSPRNG, not mt_rand (ro#732)
 			}
 			if (!isset($value['token'])) {
 				$value['token'] = self::db()->uniqueId(self::table(), 'token');

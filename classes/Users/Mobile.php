@@ -226,7 +226,7 @@ class Users_Mobile extends Base_Users_Mobile
 			}
 		}
 		Users::issueActivationCode($this); // keeps a still-valid code (#548 R09)
-		$this->authCode = sha1(microtime() . mt_rand());
+		$this->authCode = Q_Utils::randomHexString(40); // CSPRNG, not mt_rand (ro#732)
 		$number = $this->number;
 		if (substr($number, 0, 2) == '+1') {
 			$number = substr($number, 2);

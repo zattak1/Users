@@ -254,7 +254,7 @@ class Users_Email extends Base_Users_Email
 			}
 		}
 		Users::issueActivationCode($this); // keeps a still-valid code (#548 R09)
-		$this->authCode = sha1(microtime() . mt_rand());
+		$this->authCode = Q_Utils::randomHexString(40); // CSPRNG, not mt_rand (ro#732)
 		$link = Q_Uri::url('Users/activate?p=1&code='.urlencode($this->activationCode)
 			. ' emailAddress='.urlencode($this->address));
 		Users::$cache['Users/activate link'] = $link;
