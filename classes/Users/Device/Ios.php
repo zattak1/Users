@@ -13,6 +13,17 @@ class Users_Device_Ios extends Users_Device
 	 */
 	function handlePushNotification($notification, $options = array())
 	{
+		// Fail closed (ro#812). ApnsPHP speaks Apple's legacy binary provider
+		// protocol (gateway.push.apple.com:2195), which Apple stopped
+		// supporting on 2021-03-31 in favour of the HTTP/2 provider API. Refuse
+		// before reading config or connecting, so the caller learns push is
+		// unavailable instead of queuing into a dead gateway. Node's push path
+		// (Ios.js, node-apn over HTTP/2) is unaffected. Remove this only
+		// together with a port to the HTTP/2 API.
+		throw new Users_Exception_DeviceNotification(array(
+			'statusMessage' => 'the legacy binary APNs protocol is no longer supported by Apple;'
+				. ' PHP-side iOS push needs a port to the APNs HTTP/2 API'
+		));
 		list($appId, $appInfo) = Users::appInfo($this->platform, $this->appId);
 		$authority = USERS_PLUGIN_FILES_DIR.DS.'Users'.DS.'certs'.DS.'EntrustRootCA.pem';
 		$ssl = Q_Config::expect('Users', 'apps', 'ios', $appId, 'ssl');

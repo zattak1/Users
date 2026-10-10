@@ -22,7 +22,7 @@ class Users_Device_Android extends Users_Device
 		}
 		self::$push[] = array(
 			'title' => $notification['alert']['title'],
-			'body' => $notification['alert'],
+			'body' => $notification['alert']['body'],
 			'icon' => empty($notification['icon']) ? '' : $notification['icon'],
 			'click_action' => empty($notification['url']) ? null : $notification['url'],
 			'sound' => empty($notification['sound']) ? 'default' : $notification['sound']
@@ -42,6 +42,20 @@ class Users_Device_Android extends Users_Device
 		if (!self::$push) {
 			return;
 		}
+		// Fail closed (ro#812). This posts to FCM's legacy HTTP API
+		// (fcm/send with a server key), which Google deprecated on 2023-06-20
+		// and shut down from 2024-07-22 in favour of HTTP v1 (OAuth2
+		// service-account tokens, /v1/projects/<id>/messages:send). Every
+		// request below now fails, and nothing reads curl's result, so the
+		// notification used to vanish without a trace. Refuse loudly instead,
+		// before reading the key or opening a connection, and drop the queue
+		// so a later call does not retry it. Remove this only together with
+		// a port to HTTP v1.
+		self::$push = [];
+		throw new Users_Exception_DeviceNotification(array(
+			'statusMessage' => 'the FCM legacy HTTP API (fcm/send) has been shut down by Google;'
+				. ' PHP-side Android push needs a port to FCM HTTP v1'
+		));
 		$apiKey = Q_Config::expect('Users', 'apps', 'android', Q::app(), "key");
 		// A push notification must never be able to outlive the request that
 		// triggered it. curl's default CURLOPT_TIMEOUT is 0 = infinite, so
@@ -67,7 +81,10 @@ class Users_Device_Android extends Users_Device
 			curl_setopt($ch, CURLOPT_POST, true);
 			curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			// Verify the peer and its hostname: this request carries the
+			// server key, which must never go out over unverified TLS. (ro#812)
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
 			curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($fields));
 			curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $connectTimeout);
 			curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
