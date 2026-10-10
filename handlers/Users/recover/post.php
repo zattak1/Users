@@ -1,20 +1,50 @@
 <?php
 
 /**
- * Handle recovery of a user session using a previously registered recovery key.
+ * Session recovery with a previously registered recovery key: REFUSED.
  *
- * Looks up the Users_Intent created by Users_key_post by re-deriving the same
- * token (Q_Utils::signature over the recoveryKey array), then resumes the
- * original PHP session ID. The signed-request middleware verifies the
- * cryptographic signature against the public key in the request before this
- * handler runs, so reaching here implies the caller holds the recovery
- * private key.
+ * This endpoint fails closed until session recovery is redesigned (ro#860).
+ * Every request is rejected after the origin check, before anything reads the
+ * request body, the database or the session. The handler it replaces could
+ * never work, and the one part that could have started working was the
+ * dangerous part:
+ *
+ * - It never verified the recovery signature. Its docblock said the
+ *   signed-request middleware did, but Users_before_Q_objects() verifies only
+ *   when the *current* session already has a publicKey and a
+ *   Users/requireLogin rule matches the URI; a recovering session has no key,
+ *   and no rule names this URI. So once resumption worked, the recovery
+ *   *public* JWK (stored in $_SESSION, in the intent's instructions, and
+ *   returned to the opener by Users/intent) would have been a bearer
+ *   credential for the original session.
+ * - Step 3 could not resume the session. The dispatcher starts the session
+ *   before any handler (Q/session/startBefore is Q/reroute), PHP >= 7.2
+ *   refuses session_id($id) on an active session, and Q_Session::start()
+ *   without $setId returns false once an id exists, so the handler always
+ *   threw "Could not resume session". Q_Dispatcher::errors() sends no cookie
+ *   on that path either.
+ * - The client and this handler disagree on the request. recover.js sends
+ *   recoveryKey at the top level, with Q_Users_sig = {signature (hex raw
+ *   r||s), publicKey (hex SPKI), fieldNames}; the handler required
+ *   Q_Users_sig[recoveryKey], which no client sends, and Q_Data::verify()
+ *   base64-decodes its public keys, so Users::verify() cannot check a key in
+ *   the hex form Users.sign() produces.
+ *
+ * Making recovery work therefore means a design decision (adopt the old
+ * session id, or log the current session in as the original session's user
+ * the way Users_Intent::accept() does), an agreed wire format, and a
+ * server-side check that the request is signed by the private half of the
+ * very recoveryKey being presented. Until that exists, refusing is the only
+ * behaviour that cannot be abused. No page in our apps reaches this endpoint:
+ * Users.Session.recover() runs only on a Q.Users.recoveryKey.recover message
+ * from a parent frame.
+ *
+ * Users_key_post still registers recovery keys and writes the
+ * Users/registerRecoveryKey intent; nothing consumes it while this refuses.
  *
  * @method Users_recover_post
- * @throws Q_Exception_RequiredField
- * @throws Q_Exception_MissingRow
- * @throws Q_Exception
- * @throws Users_Exception_NotAuthorized
+ * @throws Q_Exception_WrongValue when the request is cross-origin
+ * @throws Q_Exception_NotImplemented always, otherwise
  */
 function Users_recover_post()
 {
@@ -22,92 +52,10 @@ function Users_recover_post()
 	// passing true to the latter sets $url and leaves the check non-throwing.
 	Q_Request::requireOrigin(true);
 
-	// Step 1 — extract recoveryKey from signed request
-	$sigField = Q_Config::get('Users', 'signatures', 'sigField', null);
-	$fieldNames = array(array($sigField, 'recoveryKey'));
-	Q_Request::requireFields($fieldNames, true);
-
-	$recoveryKey = Q::ifset($_REQUEST, $sigField, 'recoveryKey', null);
-	if (!$recoveryKey) {
-		throw new Q_Exception_RequiredField(array('field' => 'recoveryKey'));
-	}
-
-	// Step 2 — find matching Users_Intent by token (must match Users_key_post derivation).
-	// Both handlers pass the raw $recoveryKey value through Q_Utils::signature so
-	// the resulting token is byte-identical. Do NOT json_encode beforehand — that
-	// would change the signature input shape and the lookup would fail.
-	//
-	// The old derivation here was hash('sha256', $recoveryKey): an unsalted
-	// digest of a client-supplied value, so anyone holding a dump of
-	// users_intent could confirm a guessed recoveryKey offline. Q_Utils::signature
-	// is an HMAC under Q/internal/secret, which cannot be recomputed without the
-	// server secret — and it fails closed when that secret is unset (ro#452), so
-	// there is no configuration in which this silently degrades to an unkeyed
-	// hash. See zattak1/ro#454.
-	//
-	// It also repairs the lookup outright: Users_key_post already wrote
-	// Q_Utils::signature(compact('recoveryKey')), a 40-hex HMAC-SHA1, while this
-	// handler looked up a 64-hex SHA-256. The two could never be equal, so
-	// Users/recover matched no row for any input.
-	$token = Q_Utils::signature(array('recoveryKey' => $recoveryKey));
-	$intent = new Users_Intent();
-	$intent->token = $token;
-	if (!$intent->retrieve()) {
-		throw new Q_Exception_MissingRow(array(
-			'table' => 'Users_Intent',
-			'criteria' => "token=$token"
-		));
-	}
-
-	if (empty($intent->sessionId)) {
-		throw new Q_Exception(array(
-			'message' => "Intent found but missing sessionId"
-		));
-	}
-
-	// Step 3 — resume the original PHP session
-	Q_Session::id($intent->sessionId);
-	$sessionRow = Q_Session::start();
-	if (!$sessionRow) {
-		throw new Q_Exception("Could not resume session " . $intent->sessionId);
-	}
-	$sessionId = session_id();
-
-	// Step 4 — mark the intent as recovered
-	$gcMax = intval(ini_get('session.gc_maxlifetime'));
-
-	// The array form of setInstruction() only works since ro#820; before it,
-	// this line would throw ArgumentCountError. It has never been reached:
-	// the dispatcher has already started a session, so Step 3's session_id()
-	// is refused and the handler throws "Could not resume session" first.
-	// See ro#860 for Step 3 (and the unverified recovery signature).
-	// A plain save() rather than saveInstruction() is deliberate: this row's
-	// token is an HMAC under Q/internal/secret that only the server can
-	// compute, and neither action it carries declares "handoff", so no
-	// acceptedBy claim can be on it for save() to erase (ro#765).
-	$intent->action = 'Users.recoverSession';
-	$intent->setInstruction(array(
-		'recoveryKey' => $recoveryKey,
-		'recoveredAt' => date('c'),
-		'resumedSessionId' => $sessionId
+	// Fail closed (ro#860): see the docblock. Do not restore a resume path
+	// here without verifying, in this handler, that the request is signed by
+	// the private key matching the presented recoveryKey.
+	throw new Q_Exception_NotImplemented(array(
+		'functionality' => 'Users/recover (session recovery is disabled)'
 	));
-	$intent->endTime = $intent->db()->toDateTime(time() + $gcMax);
-	$intent->save();
-
-	// Step 5 — attach recovery info to PHP session
-	if (!isset($_SESSION['Users'])) {
-		$_SESSION['Users'] = array();
-	}
-	$_SESSION['Users']['recovered'] = true;
-	$_SESSION['Users']['recoveryKey'] = $recoveryKey;
-	$_SESSION['Users']['recoveryIntent'] = $intent->token;
-
-	// Step 6 — respond
-	Q_Response::setSlot('session', array(
-		'recovered' => true,
-		'sessionId' => $sessionId,
-		'intentToken' => $intent->token
-	));
-	Q_Response::setSlot('recoveryKey', $recoveryKey);
-	Q_Response::setSlot('saved', true);
 }
