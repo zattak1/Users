@@ -450,12 +450,21 @@ class Users_Intent extends Base_Users_Intent
 	 * The precondition is the whole column, so a zero-row match only says
 	 * that SOMETHING wrote instructions since our read - not that another
 	 * session claimed the handoff. A complete() storing its results does it
-	 * too (ro#829). So a miss re-reads the row, uncached, once: a claim on
-	 * record for another session is a real loss; a claim on record for THIS
-	 * session (its own concurrent request won) is a success; no claim at all
-	 * means a non-claim writer got in first, and the claim is retried once
-	 * against the bytes just re-read. Every success is still a compare-and-set
-	 * against a column that held no claim, so a second session never wins.
+	 * too (ro#829). So every miss re-reads the row, uncached - after the
+	 * first attempt and after the retry: a claim on record for another
+	 * session is a real loss; a claim on record for THIS session (its own
+	 * concurrent request won) is a success; no claim at all means a non-claim
+	 * writer got in first, and the claim is retried once against the bytes
+	 * just re-read. The second re-read is load-bearing: it is what turns a
+	 * claim landing between the first re-read and the retry into
+	 * REFUSED_CLAIMED rather than a silent miss (ro#835). Every success is
+	 * still a compare-and-set against a column that held no claim, so a
+	 * second session never wins.
+	 *
+	 * A true result adopts the database's bytes: the object's instructions
+	 * become what was written (or, when this session's own request won, what
+	 * was re-read), superseding any unsaved in-memory change to instructions
+	 * made before the call.
 	 *
 	 * @method claimHandoff
 	 * @param {string} $sessionId the session claiming the handoff
