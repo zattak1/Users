@@ -22,24 +22,10 @@ class Users_Link extends Base_Users_Link
 	{
 		parent::setUp();
 	}
-	/**
-	 * Assigns 'secret' and 'token' if empty
-	 * @method beforeSave
-	 * @param {array} $modifiedFields
-	 * @return {array}
-	 */
-	function beforeSave($value)
-	{
-		if (!$this->retrieved) {
-			if (!isset($value['secret'])) {
-				$value['secret'] = Q_Utils::randomHexString(40); // CSPRNG, not mt_rand (ro#732)
-			}
-			if (!isset($value['token'])) {
-				$value['token'] = self::db()->uniqueId(self::table(), 'token');
-			}
-		}
-		return parent::beforeSave($value);
-	}
+	// No beforeSave(): upstream's assigned `secret` and `token` on insert, but
+	// users_link has neither column (identifier, userId, extraInfo,
+	// insertedTime), so the uniqueness SELECT on `token` failed and no row
+	// could ever be inserted (ro#1077).
 
 	/* * * */
 	/**
