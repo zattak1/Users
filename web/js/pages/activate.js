@@ -45,42 +45,10 @@ Q.onReady.add(function() {
 		}
 	});
 	
-	// Get the suggestions from YAHOO, if possible
-	
 	$("#new-password").plugin("Q/placeholders").plugin("Q/clickfocus");
 	
-	// this used to work:
-	// var url = "http://query.yahooapis.com/v1/public/yql?format=json&diagnostics=false&q=select%20abstract%20from%20search.news%20where%20query%3D%22{{verb_ue}}%22";
-	// but YAHOO now deprecated the search.news table.
-	// later we can pay for BOSS to do this. But for now, here is what we do:
-	var url = "https://query.yahooapis.com/v1/public/yql?format=json&diagnostics=false&q=SELECT+Rating.LastReviewIntro+from+local.search+WHERE+zip+%3D+%2210001%22+AND+%28query%3D%22{{verb_ue}}%22+OR+query%3D%22{{noun_ue}}%22%29+AND+Rating.LastReviewIntro+MATCHES+%22%5E.%2B%22+LIMIT+10"
-        .interpolate(Users.pages.activate);
-	
 	$(".Users_activate_container .Q_buttons .Q_button").plugin("Q/clickable");
-
-	Q.request(url, null, function(err, data) {
-		if (data.query && data.query.results && data.query.results.Result) {
-			// var r = data.query.results.result;
-			var r = data.query.results.Result;
-			var ul = $("#suggestions");
-			var rand, text;
-			var source = "";
-			for (var i=0; i<r.length; ++i) {
-				text = r[i].Rating.LastReviewIntro;
-				if (text) {
-					source += " " + text;
-				}
-			}
-			var source_words = source.toLowerCase().replace(/[^A-Za-z0-9-_\" ]/g, "").split(" ");
-			for (var i=0; i<7; ++i) { // add seven quotes from here
-				rand = Math.floor(Math.random() * source_words.length);
-				var text = source_words.slice(rand, rand+3).join(" ");
-				if (text) {
-					ul.prepend($("<li />").addClass("Users_fromYahoo").html(text));
-					$("li:last", ul).eq(0).remove();
-				}
-			}
-		}
-
-	}, {"callbackName": "callback"});
+	// Upstream prepended three-word windows of Yahoo YQL review text here,
+	// picked with a non-crypto RNG, as passphrase suggestions. YQL is gone and
+	// public text is not a passphrase source (ro#732, Codex audit R01).
 });

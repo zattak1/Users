@@ -662,9 +662,10 @@ class Users_Intent extends Base_Users_Intent
 		}
 		// Generate a unique token for the intent
 		if (!isset($this->token)) {
-			$this->token = Users::db()->uniqueId(
-				Users_Intent::table(), 'token'
-			);
+			// generateToken(), not the option-less id generator, which ignored
+			// Users/intents/tokens and drew 8 letters instead of 16 (ro#732,
+			// Codex audit R02).
+			$this->token = self::generateToken();
 		}
 	}
 

@@ -59,79 +59,10 @@ function Users_activate_response_content()
 	$noun_ue = urlencode($arr['nouns'][random_int(0, count($arr['nouns']) - 1)]);
 	$code = Q::ifset($_REQUEST, 'code', null);
 	
-	// NewsAPI v2 enrichment (same output shape as before)
-	if ($key = Q_Config::get('Users', 'newsapi', 'key', null)) {
-		$words = 3;
-		try {
-			$languages = array();
-			foreach (Q_Request::languages() as $entry) {
-				$languages[reset($entry)] = true;
-			}
-
-			// v2 sources
-			$sourcesUrl = "https://newsapi.org/v2/top-headlines/sources?apiKey=" . urlencode($key);
-			$json = Q_Utils::get($sourcesUrl);
-			$result = Q::json_decode($json, true);
-
-			$sources = array();
-			$fallback = array();
-
-			if (!empty($result['sources'])) {
-				foreach ($result['sources'] as $source) {
-					if (!empty($languages[$source['language']])) {
-						$sources[] = $source['id'];
-					}
-					if ($source['language'] === 'en') {
-						$fallback[] = $source['id'];
-					}
-				}
-			}
-
-			if (!$sources) {
-				$sources = $fallback;
-			}
-
-			$suggestions2 = array();
-
-			if ($sources) {
-				$source = $sources[array_rand($sources)];
-				$url = "https://newsapi.org/v2/top-headlines?" . http_build_query(array(
-					'sources'  => $source,
-					'pageSize' => 50,
-					'apiKey'   => $key
-				));
-
-				$json = Q_Utils::get($url);
-				$result = Q::json_decode($json, true);
-
-				if (!empty($result['articles'])) {
-					foreach ($result['articles'] as $article) {
-						if (empty($article['description'])) {
-							continue;
-						}
-						$characters = "/([^A-Za-z0-9-']|\\s{2,})+/";
-						$text = strtolower(preg_replace($characters, ' ', $article['description']));
-						$parts = array_values(array_filter(explode(' ', $text)));
-						$count = count($parts);
-
-						if ($count > $words) {
-							$rand = rand(0, $count - $words);
-							$suggestion = implode(' ', array_slice($parts, $rand, $words));
-							if (strlen($suggestion) > 10) {
-								$suggestions2[] = $suggestion;
-							}
-						}
-					}
-				}
-			}
-
-			if ($suggestions2) {
-				$suggestions = $suggestions2;
-			}
-		} catch (Exception $e) {
-			// ignore
-		}
-	}
+	// The suggestions above are the only ones offered. Upstream replaced them
+	// with three-word windows of NewsAPI headlines when Users/newsapi/key was
+	// set: an enumerable set of public text picked with rand(), offered as an
+	// account passphrase (ro#732, Codex audit R01).
 	
 	$salt_json = Q::json_encode($user ? $user->salt : '');
 
