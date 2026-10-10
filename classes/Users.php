@@ -1003,6 +1003,16 @@ abstract class Users extends Base_Users
 			throw new Users_Exception_WrongPassphrase(@compact('identifier'), 'passphrase');
 		}
 
+		// Remember which hash this login proved knowledge of. The session row
+		// is only written at session close, so a passphrase change can land
+		// between this check and that write; the Q/session/write after-hook
+		// re-reads the hash once the row is committed and ends the session if
+		// it moved (ro#827, see endSessionIfPassphraseChanged).
+		self::$passphraseLogin = array(
+			'userId' => $user->id,
+			'passphraseHash' => $user->passphraseHash
+		);
+
 		// Now save this user in the session as the logged-in user
 		self::setLoggedInUser($user);
 
@@ -1403,10 +1413,16 @@ abstract class Users extends Base_Users
 		if (!isset($exceptSessionId)) {
 			$exceptSessionId = Q_Session::id();
 		}
-		// only the fields we need: a session's content can be sizable, and
-		// remove() below goes by the retrieved row's primary key
+		// only the fields we need: a session's content can be sizable.
+		// Never from the query cache (ro#816, ro#887): Users/activate calls
+		// this twice in one request, and a replayed list cannot see a session
+		// written in between. It is also half of ro#827's ordering argument:
+		// the caller committed the new passphrase hash before this read, so
+		// this must be a real read taken after that commit.
 		$sessions = Users_Session::select('id, deviceId')
 			->where(array('userId' => $user->id))
+			->ignoreCache()
+			->caching(false)
 			->fetchDbRows();
 		$sessionIds = array();
 		$ending = array(); // the rows being ended, kept for the notifications
@@ -1476,15 +1492,18 @@ abstract class Users extends Base_Users
 		// The socket is a separate matter - see ro#826: node admits a socket
 		// on its signed capability, not on the session row, so this message
 		// is a courtesy disconnect, not a revocation, with or without ro#728.
+		// One message for all of them (ro#817): each sendToNode can cost ~2 s
+		// when node is wedged, so a per-session loop made a passphrase change
+		// with many sessions the request most likely to hit the ro#581 cap.
+		// Node's Users/logout disconnects every socket of these sessions and
+		// clears the push badge once.
+		$deviceIdBySessionId = array();
 		foreach ($ending as $session) {
-			// disconnect that session's sockets and clear its push badge
-			Q_Utils::sendToNode(array(
-				"Q/method" => "Users/logout",
-				"sessionId" => $session->id,
-				"userId" => $user->id,
-				"deviceId" => isset($session->deviceId) ? $session->deviceId : null
-			));
+			$deviceIdBySessionId[$session->id] = isset($session->deviceId)
+				? $session->deviceId
+				: null;
 		}
+		self::notifyNodeOfLogout($user->id, $deviceIdBySessionId);
 		/**
 		 * After other sessions of a user have been invalidated
 		 * @event Users/logoutOtherSessions {after}
@@ -1496,6 +1515,98 @@ abstract class Users extends Base_Users
 			@compact('user', 'sessionIds', 'exceptSessionId'), 'after'
 		);
 		return count($sessionIds);
+	}
+
+	/**
+	 * Tells node, in one message, that some sessions of a user have ended:
+	 * node disconnects every socket on those sessions and clears the user's
+	 * push badge once (ro#817). Best effort, like every sendToNode: the
+	 * durable state (the deleted rows) is what logs a session out.
+	 * @method notifyNodeOfLogout
+	 * @static
+	 * @protected
+	 * @param {string} $userId
+	 * @param {array} $deviceIdBySessionId sessionId => deviceId (or null)
+	 */
+	protected static function notifyNodeOfLogout($userId, $deviceIdBySessionId)
+	{
+		if (!$deviceIdBySessionId) {
+			return;
+		}
+		// JSON strings, like Streams::subscribe's fan-out: the IPC payload is
+		// signed field by field, so nested arrays stay out of it.
+		Q_Utils::sendToNode(array(
+			"Q/method" => "Users/logout",
+			"userId" => $userId,
+			"sessionIds" => Q::json_encode(array_map('strval', array_keys($deviceIdBySessionId))),
+			"deviceIds" => Q::json_encode((object)$deviceIdBySessionId)
+		));
+	}
+
+	/**
+	 * Called once a passphrase login's session row has been committed (by the
+	 * Q/session/write after-hook). Ends that session if the user's passphrase
+	 * hash is no longer the one the login verified (ro#827).
+	 *
+	 * Why after the commit and not before: Users::login() verifies the hash
+	 * early, but the session row is only written at session close, so a
+	 * passphrase change and its logoutOtherSessions() can both run in
+	 * between. Users/activate commits the new hash and THEN reads the user's
+	 * sessions; this commits the session row and THEN reads the hash. Of two
+	 * write-then-read sequences, at least one read sees the other's write:
+	 * either logoutOtherSessions() found this row and deleted it, or this read
+	 * sees the new hash and deletes it here. A check before the write would
+	 * leave the window open (check passes, hash changes, sessions are listed,
+	 * row is written).
+	 *
+	 * The read is a locking read so that it sees the latest committed hash
+	 * even if a caller left a transaction (and an older snapshot) open on
+	 * this connection, and waits for an in-flight hash update to resolve.
+	 *
+	 * @method endSessionIfPassphraseChanged
+	 * @static
+	 * @param {string} $sessionId The session id that was just written
+	 * @return {boolean} Whether the session was ended
+	 */
+	static function endSessionIfPassphraseChanged($sessionId)
+	{
+		$login = self::$passphraseLogin;
+		if (!$login or !$sessionId) {
+			return false;
+		}
+		self::$passphraseLogin = null; // once per login
+		$userId = $login['userId'];
+		$hashes = Users_User::select('passphraseHash')
+			->where(array('id' => $userId))
+			->lock('LOCK IN SHARE MODE')
+			->ignoreCache()
+			->caching(false)
+			->fetchAll(PDO::FETCH_COLUMN);
+		if ($hashes and reset($hashes) === $login['passphraseHash']) {
+			return false;
+		}
+		// The passphrase this login proved is no longer the passphrase (or
+		// the user is gone). Same teardown as logoutOtherSessions(), for one
+		// session. The row goes first because it is what logs the session
+		// out; a device registered within this same login request is
+		// unlikely, so that DELETE is almost always a no-op.
+		Users_Session::delete()->where(array(
+			'id' => $sessionId,
+			'userId' => $userId
+		))->execute();
+		Users_Device::delete()->where(array(
+			'userId' => $userId,
+			'sessionId' => $sessionId
+		))->execute();
+		Q::log("Users::endSessionIfPassphraseChanged: ended session of user $userId"
+			. " whose login verified a passphrase that changed before the session was saved (ro#827)");
+		self::$loggedOut = true;
+		try {
+			self::notifyNodeOfLogout($userId, array($sessionId => null));
+		} catch (Exception $e) {
+			// the row is gone, which is what logs the session out
+		}
+		return true;
 	}
 
 	/**
@@ -3442,6 +3553,15 @@ abstract class Users extends Base_Users
 	 * @type boolean
 	 */
 	public static $loggedOut;
+	/**
+	 * Set by login() when this request verified a passphrase: the user id and
+	 * the hash it verified against, for endSessionIfPassphraseChanged()
+	 * (ro#827). Null otherwise.
+	 * @property $passphraseLogin
+	 * @type array|null
+	 * @default null
+	 */
+	public static $passphraseLogin = null;
 	/**
 	 * @property $intent
 	 * @type Users_Intent

@@ -3,6 +3,14 @@
 function Users_after_Q_session_write($params)
 {
 	Q::$state['session'] = true;
+	// A passphrase login whose session row has now been committed: end it if
+	// the passphrase changed after the login verified it (ro#827). Before the
+	// "changed" check, so it runs whatever this write did; it sets
+	// Users::$loggedOut when it ends the session, which the code below tells
+	// node about.
+	if (Users::$passphraseLogin) {
+		Users::endSessionIfPassphraseChanged(Q::ifset($params, 'id', null));
+	}
 	if (!$params['changed']) {
 		return;
 	}
