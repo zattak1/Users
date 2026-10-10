@@ -165,19 +165,36 @@ Users.listen = function (options) {
 		Q.log("Socket upgraded to user " + userId + " (" + clientId + ")");
 	});
 
-	// Users/logout — disconnect sockets for a session and clear push badge.
+	// Users/logout — disconnect sockets for one or more sessions of a user
+	// and clear the push badge once. PHP's Users::logout() sends one
+	// `sessionId`; Users::logoutOtherSessions() sends every ended session in
+	// one message as `sessionIds`, a JSON array (ro#817), instead of one
+	// message per session.
 	server.addMethod('Users/logout', function (parsed) {
 		var userId = parsed.userId;
-		var sessionId = parsed.sessionId;
 		if (!userId) {
 			return;
 		}
-		if (sessionId) {
-			var clients = Users.clients[userId];
-			for (var cid in clients) {
-				if (clients[cid] && clients[cid].sessionId === sessionId) {
-					clients[cid].disconnect();
+		var sessionIds = {};
+		if (parsed.sessionId) {
+			sessionIds[parsed.sessionId] = true;
+		}
+		var list = parsed.sessionIds;
+		if (typeof list === 'string') {
+			try { list = JSON.parse(list); } catch (e) { list = null; }
+		}
+		if (Array.isArray(list)) {
+			for (var i = 0; i < list.length; i++) {
+				if (typeof list[i] === 'string' && list[i]) {
+					sessionIds[list[i]] = true;
 				}
+			}
+		}
+		var clients = Users.clients[userId];
+		for (var cid in clients) {
+			if (clients[cid] && clients[cid].sessionId
+			&& Object.prototype.hasOwnProperty.call(sessionIds, clients[cid].sessionId)) {
+				clients[cid].disconnect();
 			}
 		}
 		Users.pushNotifications(userId, {
