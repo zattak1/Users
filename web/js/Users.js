@@ -1020,7 +1020,7 @@
 		 * @param {String} [options.redirect_uri] You can override the redirect URI.
 		 *    Often this has to be added to a whitelist on the platform's side.
 		 * @param {String} [options.response_type='code']
-		 * @param {String} [options.state=Math.random()] If state was not provided, this
+		 * @param {String} [options.state=Q.nonce] If state was not provided, this
 		 *    method also modifies the passed options object and sets options.state on it
 		 * @return {String} The URL to redirect to or open in a window
 		 */
@@ -1032,7 +1032,12 @@
 				redirectUri = Q.url(redirectUri + '?openWindow=1');
 			}
 			if (!options.state) {
-				options.state = String(Math.random());
+				// The session nonce, which Users/oauthed requires as state, not
+				// Math.random(), which it always refused (ro#1082).
+				options.state = Q.nonce || Q.cookie('Q_nonce');
+				if (!options.state) {
+					throw new Q.Exception("Users.OAuth: no session nonce to use as state");
+				}
 			}
 			Q.cookie('Users_latest_oAuth_state', options.state);
 			Q.url(authorizeUri, {

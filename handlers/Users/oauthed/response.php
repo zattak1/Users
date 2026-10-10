@@ -6,7 +6,8 @@ function Users_oauthed_response()
 		Q_Request::requireFields(array('state', 'code'), true);
 		$state = $_REQUEST['state'];
 		$code = $_REQUEST['code'];
-		Q_Valid::requireFields(array('Users_oAuth'), $_COOKIE, true);
+		// The cookie start.js sets is Q_Users_oAuth; this checked 'Users_oAuth' (ro#1082).
+		Q_Valid::requireFields(array('Q_Users_oAuth'), $_COOKIE, true);
 		$info = Q::json_decode($_COOKIE['Q_Users_oAuth'], true);
 		Q_Response::clearCookie('Q_Users_oAuth');
 		Q_Valid::requireFields(array(
@@ -15,7 +16,9 @@ function Users_oauthed_response()
 		$platform = $info['platform'];
 		$appId = $info['appId'];
 		$scope = $info['scope'];
-		if ($state !== Q_Session::calculateNonce()) {
+		$nonce = Q_Session::calculateNonce();
+		if (!is_string($state) or !$nonce or !hash_equals($nonce, $state)
+		or !is_string($info['state']) or !hash_equals($info['state'], $state)) {
 			throw new Users_Exception_WrongState(array(
 				'key' => 'state',
 				'state' => $state
